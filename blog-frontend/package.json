@@ -1,0 +1,25 @@
+{
+  "name": "blog-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vite": "^7.2.4"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "^6.0.3",
+    "@vue/typescript": "^1.8.20",
+    "axios": "^1.13.2",
+    "element-plus": "^2.13.1",
+    "pinia": "^3.0.4",
+    "vditor": "^3.11.2",
+    "vue": "^3.5.26",
+    "vue-router": "^4.6.4"
+  }
+}
