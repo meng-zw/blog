@@ -63,7 +63,7 @@ let vditor: Vditor | null = null
 
 const articleForm = ref({
   title: '',
-  category_id: '',
+  categoryId: '',
   tags: [] as string[],
   content: ''
 })
