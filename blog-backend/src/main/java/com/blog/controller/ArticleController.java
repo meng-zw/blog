@@ -6,6 +6,7 @@ import com.blog.entity.User;
 import com.blog.repository.ArticleRepository;
 import com.blog.repository.CategoryRepository;
 import com.blog.repository.UserRepository;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +17,8 @@ import org.springframework.web.bind.annotation.*;
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
+
+import java.io.Serializable;
 import java.util.Date;
 import java.util.List;
 
@@ -23,7 +26,7 @@ import java.util.List;
  * 文章控制器，处理文章的CRUD操作
  */
 @RestController
-@RequestMapping("/article")
+@RequestMapping("/articles")
 @Transactional
 public class ArticleController {
 
@@ -203,10 +206,11 @@ public class ArticleController {
     /**
      * 文章DTO
      */
-    public static class ArticleDTO {
+    public static class ArticleDTO implements Serializable {
         private String title;
         private String content;
         private String htmlContent;
+        @JsonProperty("category_id")
         private Long categoryId;
 
         // getter和setter方法
