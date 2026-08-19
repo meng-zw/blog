@@ -1,0 +1,15 @@
+# 构建产物与本地缓存（镜像内会重新打包，避免旧产物干扰）
+target/
+
+# IDE 配置
+.idea/
+*.iml
+
+# 版本控制
+.git/
+.gitignore
+
+# 其他与镜像构建无关的文件
+test-build.bat
+Dockerfile
+.dockerignore
