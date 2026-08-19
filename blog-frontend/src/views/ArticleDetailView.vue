@@ -4,9 +4,9 @@
       <article v-if="article" class="article">
         <header class="article__header">
           <div class="article__meta">
-            <span class="article__tag">
+            <span class="article__tag" @click="goToArticleList">
               <Icon name="tag" size="xs" />
-              技术
+              {{ article.category?.name || '技术' }}
             </span>
             <span class="article__date">
               <Icon name="calendar" size="xs" />
@@ -119,11 +119,13 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
 import Icon from '../components/Icon.vue'
 
 const route = useRoute()
+const router = useRouter()
 const article = ref<any>(null)
 const comments = ref<any[]>([])
 const commentForm = ref({ content: '' })
@@ -134,6 +136,10 @@ const readingTime = computed(() => {
   const words = article.value.content.length
   return Math.max(1, Math.ceil(words / 500))
 })
+
+const goToArticleList = () => {
+  router.push('/article')
+}
 
 const formatDate = (dateStr: string) => {
   if (!dateStr) return ''
@@ -248,6 +254,14 @@ const submitComment = async () => {
     return
   }
   
+  // 检查登录状态
+  const token = localStorage.getItem('token')
+  if (!token) {
+    ElMessage.warning('请先登录后再评论')
+    router.push('/login')
+    return
+  }
+  
   submitting.value = true
   
   try {
@@ -257,8 +271,10 @@ const submitComment = async () => {
     })
     comments.value.unshift(newComment)
     commentForm.value.content = ''
+    ElMessage.success('评论发布成功')
   } catch (error) {
     console.error('提交评论失败:', error)
+    ElMessage.error('评论发布失败，请稍后重试')
   } finally {
     submitting.value = false
   }
@@ -276,31 +292,26 @@ onMounted(() => {
 
 <style scoped>
 .article-detail {
-  animation: fadeIn var(--transition-normal);
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  animation: none;
 }
 
 .article-container {
-  max-width: 800px;
+  max-width: 760px;
   margin: 0 auto;
 }
 
 .article {
   background-color: var(--color-bg-primary);
-  border-radius: var(--border-radius-xl);
-  padding: var(--space-8);
-  margin-bottom: var(--space-6);
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--border-radius-lg);
+  padding: var(--space-6) var(--space-6) var(--space-5);
+  margin-bottom: var(--space-5);
+  box-shadow: none;
   border: 1px solid var(--color-border-light);
 }
 
 .article__header {
-  margin-bottom: var(--space-6);
-  padding-bottom: var(--space-6);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-5);
   border-bottom: 1px solid var(--color-border-light);
 }
 
@@ -311,16 +322,28 @@ onMounted(() => {
   margin-bottom: var(--space-4);
 }
 
+/* 橙色圆角分类标签 */
 .article__tag {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-1) var(--space-3);
-  background-color: var(--color-primary-50);
-  color: var(--color-primary-700);
+  padding: 2px var(--space-3);
+  background-color: var(--color-accent-400);
+  color: #ffffff;
   border-radius: var(--border-radius-full);
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
+  font-family: var(--font-family-ui);
   font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.article__tag :deep(svg) {
+  display: none;
+}
+
+.article__tag:hover {
+  background-color: var(--color-accent-500);
+  color: #ffffff;
 }
 
 .article__date {
@@ -332,11 +355,13 @@ onMounted(() => {
 }
 
 .article__title {
+  font-family: var(--font-family-display);
   font-size: var(--font-size-3xl);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-3);
   line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-wide);
 }
 
 .article__stats {
@@ -357,6 +382,7 @@ onMounted(() => {
   font-size: var(--font-size-base);
   line-height: var(--line-height-relaxed);
   color: var(--color-text-secondary);
+  word-break: break-word;
 }
 
 .article__content h2 {
@@ -388,19 +414,20 @@ onMounted(() => {
 }
 
 .article__content pre {
-  background-color: var(--color-gray-800);
-  color: var(--color-gray-100);
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
   padding: var(--space-4);
-  border-radius: var(--border-radius-lg);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--border-radius-md);
   overflow-x: auto;
   margin: var(--space-4) 0;
 }
 
 .article__content code {
-  background-color: var(--color-gray-100);
-  padding: var(--space-1) var(--space-2);
+  background-color: var(--color-bg-tertiary);
+  padding: 0.15em 0.4em;
   border-radius: var(--border-radius-sm);
-  font-size: 0.9em;
+  font-size: 0.875em;
 }
 
 .article__content pre code {
@@ -409,8 +436,8 @@ onMounted(() => {
 }
 
 .article__footer {
-  margin-top: var(--space-8);
-  padding-top: var(--space-6);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
   border-top: 1px solid var(--color-border-light);
 }
 
@@ -427,8 +454,8 @@ onMounted(() => {
 
 .comment-section {
   background-color: var(--color-bg-primary);
-  border-radius: var(--border-radius-xl);
-  padding: var(--space-6);
+  border-radius: var(--border-radius-lg);
+  padding: var(--space-5);
   border: 1px solid var(--color-border-light);
 }
 
@@ -456,20 +483,9 @@ onMounted(() => {
 
 .comment-card {
   padding: var(--space-4);
-  background-color: var(--color-gray-50);
-  border-radius: var(--border-radius-lg);
-  animation: slideIn var(--transition-normal);
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateX(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--border-radius-md);
+  animation: none;
 }
 
 .comment-card__header {
@@ -480,13 +496,14 @@ onMounted(() => {
 }
 
 .comment-card__avatar {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--color-primary-100);
-  color: var(--color-primary-600);
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  color: var(--color-text-tertiary);
   border-radius: var(--border-radius-full);
 }
 
@@ -554,11 +571,11 @@ onMounted(() => {
 
 @media (max-width: 768px) {
   .article {
-    padding: var(--space-5);
+    padding: var(--space-4);
   }
   
   .article__title {
-    font-size: var(--font-size-2xl);
+    font-size: var(--font-size-xl);
   }
   
   .article__stats {

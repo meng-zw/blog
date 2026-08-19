@@ -54,6 +54,17 @@ const toolForm = ref({
   category_id: ''
 })
 
+// 检查登录状态
+const checkLogin = () => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    alert('请先登录后再分享工具')
+    router.push('/login')
+    return false
+  }
+  return true
+}
+
 const categories = ref<any[]>([])
 
 const loadCategories = async () => {
@@ -100,7 +111,12 @@ const submitTool = async () => {
     router.push('/tool')
   } catch (error: any) {
     console.error('分享工具失败:', error)
-    alert(error.response?.data?.message || '工具分享失败，请稍后重试')
+    if (error.response?.status === 403 || error.response?.status === 401) {
+      alert('请先登录后再分享工具')
+      router.push('/login')
+    } else {
+      alert(error.response?.data?.message || '工具分享失败，请稍后重试')
+    }
   }
 }
 
@@ -109,6 +125,8 @@ const cancel = () => {
 }
 
 onMounted(async () => {
+  // 检查登录状态，未登录则跳转
+  if (!checkLogin()) return
   await loadCategories()
 })
 </script>

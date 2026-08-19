@@ -154,6 +154,8 @@
                     <source>21</source>
                     <target>21</target>
                     <encoding>UTF-8</encoding>
+                    <!-- 保留方法参数名，Spring Boot 3.2+ 反射解析 @PathVariable/@RequestParam 需要 -->
+                    <parameters>true</parameters>
                 </configuration>
             </plugin>
         </plugins>

@@ -88,8 +88,8 @@ public class ArticleController {
      */
     @GetMapping
     public ResponseEntity<?> getArticleList(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "10") int size) {
         // 计算偏移量
         int offset = page * size;
 
@@ -114,12 +114,25 @@ public class ArticleController {
     }
 
     /**
+     * 获取最新文章列表（首页用）
+     * @return 最新5篇文章
+     */
+    @GetMapping("/latest")
+    public ResponseEntity<?> getLatestArticles() {
+        // 查询文章列表，按创建时间倒序
+        List<Article> articles = articleRepository.findAllByOrderByCreatedAtDesc();
+        // 只返回最新的5篇
+        List<Article> latest = articles.stream().limit(5).toList();
+        return ResponseEntity.ok(latest);
+    }
+
+    /**
      * 获取文章详情
      * @param id 文章ID
      * @return 文章详情
      */
     @GetMapping("/{id}")
-    public ResponseEntity<?> getArticleDetail(@PathVariable Long id) {
+    public ResponseEntity<?> getArticleDetail(@PathVariable("id") Long id) {
         // 查询文章
         Article article = articleRepository.findById(id).orElse(null);
         if (article == null) {
@@ -140,7 +153,7 @@ public class ArticleController {
      * @return 更新结果
      */
     @PutMapping("/{id}")
-    public ResponseEntity<?> updateArticle(@PathVariable Long id, @RequestBody ArticleDTO articleDTO) {
+    public ResponseEntity<?> updateArticle(@PathVariable("id") Long id, @RequestBody ArticleDTO articleDTO) {
         // 获取当前用户
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String username = authentication.getName();
@@ -181,7 +194,7 @@ public class ArticleController {
      * @return 删除结果
      */
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> deleteArticle(@PathVariable Long id) {
+    public ResponseEntity<?> deleteArticle(@PathVariable("id") Long id) {
         // 获取当前用户
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String username = authentication.getName();

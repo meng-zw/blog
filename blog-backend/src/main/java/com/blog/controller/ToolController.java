@@ -6,6 +6,7 @@ import com.blog.entity.User;
 import com.blog.repository.CategoryRepository;
 import com.blog.repository.ToolRepository;
 import com.blog.repository.UserRepository;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,7 +22,7 @@ import java.util.List;
  * 工具控制器，处理工具分享的CRUD操作
  */
 @RestController
-@RequestMapping("/tool")
+@RequestMapping("/tools")
 @Transactional
 public class ToolController {
 
@@ -83,8 +84,8 @@ public class ToolController {
      */
     @GetMapping
     public ResponseEntity<?> getToolList(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "10") int size) {
         // 计算偏移量
         int offset = page * size;
 
@@ -109,12 +110,25 @@ public class ToolController {
     }
 
     /**
+     * 获取热门工具列表（首页用）
+     * @return 热门工具列表
+     */
+    @GetMapping("/popular")
+    public ResponseEntity<?> getPopularTools() {
+        // 查询工具列表，按浏览量倒序
+        List<Tool> tools = toolRepository.findAllByOrderByViewCountDesc();
+        // 只返回前5个
+        List<Tool> popular = tools.stream().limit(5).toList();
+        return ResponseEntity.ok(popular);
+    }
+
+    /**
      * 获取工具详情
      * @param id 工具ID
      * @return 工具详情
      */
     @GetMapping("/{id}")
-    public ResponseEntity<?> getToolDetail(@PathVariable Long id) {
+    public ResponseEntity<?> getToolDetail(@PathVariable("id") Long id) {
         // 查询工具
         Tool tool = toolRepository.findById(id).orElse(null);
         if (tool == null) {
@@ -135,7 +149,7 @@ public class ToolController {
      * @return 更新结果
      */
     @PutMapping("/{id}")
-    public ResponseEntity<?> updateTool(@PathVariable Long id, @RequestBody ToolDTO toolDTO) {
+    public ResponseEntity<?> updateTool(@PathVariable("id") Long id, @RequestBody ToolDTO toolDTO) {
         // 获取当前用户
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String username = authentication.getName();
@@ -176,7 +190,7 @@ public class ToolController {
      * @return 删除结果
      */
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> deleteTool(@PathVariable Long id) {
+    public ResponseEntity<?> deleteTool(@PathVariable("id") Long id) {
         // 获取当前用户
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         String username = authentication.getName();
@@ -205,6 +219,7 @@ public class ToolController {
         private String name;
         private String description;
         private String url;
+        @JsonProperty("category_id")
         private Long categoryId;
 
         // getter和setter方法

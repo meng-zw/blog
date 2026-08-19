@@ -3,8 +3,8 @@
     <svg v-if="variant === 'icon'" class="logo__icon" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#6366f1"/>
-          <stop offset="100%" stop-color="#4f46e5"/>
+          <stop offset="0%" stop-color="#8f6b47"/>
+          <stop offset="100%" stop-color="#5c4430"/>
         </linearGradient>
       </defs>
       <rect width="40" height="40" rx="10" fill="url(#logoGradient)"/>
@@ -25,8 +25,8 @@
       <svg class="logo__icon-small" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <linearGradient id="logoGradientCombined" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#6366f1"/>
-            <stop offset="100%" stop-color="#4f46e5"/>
+            <stop offset="0%" stop-color="#8f6b47"/>
+            <stop offset="100%" stop-color="#5c4430"/>
           </linearGradient>
         </defs>
         <rect width="32" height="32" rx="8" fill="url(#logoGradientCombined)"/>
@@ -66,7 +66,7 @@ const handleClick = () => {
   align-items: center;
   gap: var(--space-2);
   color: var(--color-text-primary);
-  transition: transform var(--transition-fast), opacity var(--transition-fast);
+  transition: opacity var(--transition-fast);
 }
 
 .logo--link {
@@ -74,12 +74,11 @@ const handleClick = () => {
 }
 
 .logo--link:hover {
-  transform: scale(1.02);
-  opacity: 0.9;
+  opacity: 0.8;
 }
 
 .logo--link:active {
-  transform: scale(0.98);
+  opacity: 0.7;
 }
 
 .logo__icon {
@@ -103,21 +102,21 @@ const handleClick = () => {
 }
 
 .logo__text-label {
-  font-family: var(--font-family-sans);
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-bold);
+  font-family: var(--font-family-display);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
-  letter-spacing: var(--letter-spacing-tight);
+  letter-spacing: var(--letter-spacing-wide);
 }
 
 /* 暗色模式 */
 @media (prefers-color-scheme: dark) {
   .logo {
-    color: var(--color-text-inverse);
+    color: var(--color-text-primary);
   }
   
   .logo__text-label {
-    color: var(--color-text-inverse);
+    color: var(--color-text-primary);
   }
 }
 </style>

@@ -19,6 +19,12 @@ public interface ToolRepository extends JpaRepository<Tool, Long> {
     List<Tool> findAllByOrderByCreatedAtDesc();
 
     /**
+     * 按浏览量倒序查询所有工具
+     */
+    @Query("SELECT t FROM Tool t ORDER BY t.viewCount DESC")
+    List<Tool> findAllByOrderByViewCountDesc();
+
+    /**
      * 获取工具总数
      */
     long count();

@@ -1,5 +1,7 @@
 package com.blog.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
@@ -53,8 +55,9 @@ public class Comment {
     private String targetType;
 
     /**
-     * 父评论ID（用于回复）
+     * 父评论ID（用于回复，不序列化避免循环引用）
      */
+    @JsonIgnore
     @ManyToOne
     @JoinColumn(name = "parent_id")
     private Comment parent;
@@ -72,5 +75,14 @@ public class Comment {
     @LastModifiedDate
     @Column(name = "updated_at", nullable = false)
     private Date updatedAt;
+
+    /**
+     * 序列化时直接输出评论者用户名，便于前端展示
+     * @return 评论者用户名
+     */
+    @JsonProperty("username")
+    public String getUsername() {
+        return user == null ? null : user.getUsername();
+    }
 
 }

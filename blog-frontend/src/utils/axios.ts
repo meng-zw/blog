@@ -38,8 +38,13 @@ instance.interceptors.response.use(
           window.location.href = '/login'
           break
         case 403:
-          // 禁止访问
+          // 未授权或禁止访问，未登录时跳转到登录页
           console.error('禁止访问')
+          const token = localStorage.getItem('token')
+          if (!token) {
+            // 未登录时跳转到登录页
+            window.location.href = '/login'
+          }
           break
         case 404:
           // 资源不存在

@@ -123,25 +123,14 @@ const login = async () => {
 .login-container {
   width: 100%;
   max-width: 420px;
-  animation: slideUp var(--transition-normal);
-}
-
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  animation: none;
 }
 
 .login-card {
   background-color: var(--color-bg-primary);
-  border-radius: var(--border-radius-2xl);
-  padding: var(--space-8);
-  box-shadow: var(--shadow-lg);
+  border-radius: var(--border-radius-lg);
+  padding: var(--space-8) var(--space-6);
+  box-shadow: var(--shadow-md);
   border: 1px solid var(--color-border-light);
 }
 
@@ -156,10 +145,12 @@ const login = async () => {
 }
 
 .login__title {
+  font-family: var(--font-family-display);
   font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
   margin: 0 0 var(--space-2);
+  letter-spacing: var(--letter-spacing-wide);
 }
 
 .login__subtitle {
@@ -224,7 +215,7 @@ const login = async () => {
   }
   
   .login__title {
-    font-size: var(--font-size-xl);
+    font-size: var(--font-size-lg);
   }
 }
 </style>

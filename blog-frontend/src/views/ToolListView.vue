@@ -107,85 +107,59 @@ const formatUrl = (url: string) => {
 
 onMounted(async () => {
   try {
-    tools.value = await axios.get('/tools')
+    const res = await axios.get('/tools', {
+      params: { page: 0, size: 100 }
+    })
+    // 后端返回 {tools, total, page, size} 包装对象，取其中的 tools 数组
+    tools.value = res.tools || []
   } catch (error) {
     console.error('获取工具列表失败:', error)
-    tools.value = [
-      {
-        id: 1,
-        name: 'Markdown 编辑器',
-        description: '一个功能强大的在线 Markdown 编辑器，支持实时预览和多种主题切换，让写作更加轻松愉快。',
-        url: 'https://example.com/markdown-editor',
-        created_at: '2026-01-25'
-      },
-      {
-        id: 2,
-        name: '在线图片压缩工具',
-        description: '免费的在线图片压缩工具，支持 JPG、PNG、WebP 等多种格式，快速减小图片体积。',
-        url: 'https://example.com/image-compressor',
-        created_at: '2026-01-24'
-      },
-      {
-        id: 3,
-        name: 'JSON 格式化器',
-        description: '快速格式化、验证和压缩 JSON 数据，支持语法高亮和错误检测。',
-        url: 'https://example.com/json-formatter',
-        created_at: '2026-01-23'
-      },
-      {
-        id: 4,
-        name: 'CSS 三角形生成器',
-        description: '可视化生成 CSS 三角形代码，支持自定义颜色、尺寸和方向。',
-        url: 'https://example.com/css-triangle',
-        created_at: '2026-01-22'
-      },
-      {
-        id: 5,
-        name: '正则表达式测试器',
-        description: '在线测试和调试正则表达式，实时显示匹配结果。',
-        url: 'https://example.com/regex-tester',
-        created_at: '2026-01-21'
-      },
-      {
-        id: 6,
-        name: 'Base64 编解码器',
-        description: '在线 Base64 编码和解码工具，支持文件和文本。',
-        url: 'https://example.com/base64',
-        created_at: '2026-01-20'
-      }
-    ]
+    tools.value = []
   }
 })
 </script>
 
 <style scoped>
 .tool-list {
-  animation: fadeIn var(--transition-normal);
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  animation: none;
 }
 
 .page-header {
-  background: linear-gradient(135deg, var(--color-success-50) 0%, var(--color-bg-primary) 100%);
-  border-radius: var(--border-radius-2xl);
-  padding: var(--space-8);
+  background-color: transparent;
+  border: none;
+  border-top: 1px solid var(--color-border-default);
+  border-bottom: 1px solid var(--color-border-default);
+  border-radius: 0;
+  padding: var(--space-8) var(--space-5);
   margin-bottom: var(--space-8);
   text-align: center;
 }
 
 .page-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-5);
+  font-family: var(--font-family-display);
   font-size: var(--font-size-3xl);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
   margin: 0 0 var(--space-2);
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+.page-title::before,
+.page-title::after {
+  content: "";
+  width: 48px;
+  height: 1px;
+  background: var(--color-border-strong);
+  flex-shrink: 0;
 }
 
 .page-subtitle {
   font-size: var(--font-size-base);
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
   margin: 0;
 }
 
@@ -196,26 +170,14 @@ onMounted(async () => {
 }
 
 .tool-card {
-  border-radius: var(--border-radius-xl);
-  animation: slideUp var(--transition-normal) ease-out both;
+  border-radius: var(--border-radius-lg);
+  animation: none;
   border: 1px solid var(--color-border-light);
-  transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+  transition: border-color var(--transition-normal);
 }
 
 .tool-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-lg);
-}
-
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  border-color: var(--color-border-default);
 }
 
 .tool-card__header {
@@ -226,14 +188,17 @@ onMounted(async () => {
 }
 
 .tool-card__icon {
-  width: 56px;
-  height: 56px;
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--border-radius-xl);
-  color: white;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--border-radius-md);
+  color: var(--color-text-tertiary);
   flex-shrink: 0;
+  /* 覆盖模板内联渐变背景，统一为朴素色 */
+  background: var(--color-bg-tertiary) !important;
 }
 
 .tool-card__info {
@@ -254,7 +219,7 @@ onMounted(async () => {
 }
 
 .tool-card__name:hover {
-  color: var(--color-success-600);
+  color: var(--color-primary-600);
 }
 
 .tool-card__date {
@@ -293,7 +258,7 @@ onMounted(async () => {
 }
 
 .tool-card__url a {
-  color: var(--color-success-600);
+  color: var(--color-primary-600);
   text-decoration: none;
   max-width: 150px;
   white-space: nowrap;
@@ -309,25 +274,24 @@ onMounted(async () => {
   text-align: center;
   padding: var(--space-12);
   background-color: var(--color-bg-primary);
-  border-radius: var(--border-radius-xl);
-  border: 2px dashed var(--color-border-light);
-  animation: fadeIn var(--transition-normal);
+  border-radius: var(--border-radius-lg);
+  border: 1px dashed var(--color-border-default);
 }
 
 .empty-state__icon {
-  width: 80px;
-  height: 80px;
+  width: 72px;
+  height: 72px;
   margin: 0 auto var(--space-4);
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--color-success-50);
+  background-color: var(--color-bg-tertiary);
   border-radius: var(--border-radius-full);
-  color: var(--color-success-500);
+  color: var(--color-text-tertiary);
 }
 
 .empty-state__title {
-  font-size: var(--font-size-xl);
+  font-size: var(--font-size-lg);
   font-weight: var(--font-weight-semibold);
   color: var(--color-text-primary);
   margin: 0 0 var(--space-2);
@@ -344,7 +308,7 @@ onMounted(async () => {
   }
   
   .page-title {
-    font-size: var(--font-size-2xl);
+    font-size: var(--font-size-lg);
   }
   
   .tool-grid {

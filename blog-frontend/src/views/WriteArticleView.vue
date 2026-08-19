@@ -54,6 +54,7 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import Vditor from 'vditor'
+import { ElMessage } from 'element-plus'
 import 'vditor/dist/index.css'
 import axios from '../utils/axios'
 
@@ -61,11 +62,23 @@ const router = useRouter()
 const editorRef = ref<HTMLElement | null>(null)
 let vditor: Vditor | null = null
 
+// 检查登录状态
+const checkLogin = () => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    ElMessage.warning('请先登录后再写文章')
+    router.push('/login')
+    return false
+  }
+  return true
+}
+
 const articleForm = ref({
   title: '',
-  categoryId: '',
+  category_id: '' as string | number,
   tags: [] as string[],
-  content: ''
+  content: '',
+  html_content: ''
 })
 
 const categories = ref<any[]>([])
@@ -135,7 +148,9 @@ const submitArticle = async () => {
   }
   
   articleForm.value.content = content
-  
+  // 获取编辑器渲染后的 HTML，供详情页展示
+  articleForm.value.html_content = vditor?.getHTML() || ''
+
   try {
     // 真实API调用发布文章
     await axios.post('/articles', articleForm.value)
@@ -150,15 +165,10 @@ const submitArticle = async () => {
 const saveDraft = async () => {
   const content = vditor?.getValue() || ''
   articleForm.value.content = content
-  
-  try {
-    // 真实API调用保存草稿
-    await axios.post('/articles/draft', articleForm.value)
-    alert('草稿保存成功')
-  } catch (error: any) {
-    console.error('保存草稿失败:', error)
-    alert(error.response?.data?.message || '草稿保存失败，请稍后重试')
-  }
+  articleForm.value.html_content = vditor?.getHTML() || ''
+
+  // 后端暂未提供草稿接口，内容已在表单中本地暂存
+  ElMessage.info('草稿已在本地暂存，确认内容完整后可发布')
 }
 
 const cancel = () => {
@@ -166,6 +176,8 @@ const cancel = () => {
 }
 
 onMounted(async () => {
+  // 检查登录状态，未登录则跳转
+  if (!checkLogin()) return
   await loadCategoriesAndTags()
   initEditor()
 })

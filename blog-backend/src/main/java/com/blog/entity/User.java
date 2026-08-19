@@ -1,5 +1,6 @@
 package com.blog.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
@@ -34,8 +35,9 @@ public class User {
     private String username;
 
     /**
-     * 密码（加密存储）
+     * 密码（加密存储，不序列化到 JSON）
      */
+    @JsonIgnore
     @Column(name = "password", nullable = false, length = 100)
     private String password;
 

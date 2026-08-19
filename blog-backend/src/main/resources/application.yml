@@ -1,6 +1,12 @@
 spring:
   application:
     name: blog-backend
+
+  # Jackson 序列化配置：字段名转下划线（与前端 snake_case 约定一致）
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
   
   # 数据库配置
   datasource:

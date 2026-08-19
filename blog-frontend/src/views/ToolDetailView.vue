@@ -58,10 +58,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import axios from '../utils/axios'
 
 const route = useRoute()
+const router = useRouter()
 const tool = ref<any>(null)
 const comments = ref<any[]>([])
 const commentForm = ref({
@@ -75,20 +76,35 @@ const openToolUrl = () => {
 }
 
 const submitComment = async () => {
-  if (commentForm.value.content.trim()) {
-    const id = route.params.id
-    try {
-      // 真实API调用提交评论
-      const newComment = await axios.post(`/tools/${id}/comments`, {
-        content: commentForm.value.content
-      })
-      comments.value.push(newComment)
-      commentForm.value.content = ''
-      if (tool.value) {
-        tool.value.comment_count++
-      }
-    } catch (error) {
-      console.error('提交评论失败:', error)
+  if (!commentForm.value.content.trim()) {
+    return
+  }
+  
+  // 检查登录状态
+  const token = localStorage.getItem('token')
+  if (!token) {
+    alert('请先登录后再评论')
+    router.push('/login')
+    return
+  }
+  
+  const id = route.params.id
+  try {
+    // 真实API调用提交评论
+    const newComment = await axios.post(`/tools/${id}/comments`, {
+      content: commentForm.value.content
+    })
+    comments.value.push(newComment)
+    commentForm.value.content = ''
+    if (tool.value) {
+      tool.value.comment_count++
+    }
+  } catch (error) {
+    console.error('提交评论失败:', error)
+    if (error.response?.status === 403 || error.response?.status === 401) {
+      alert('请先登录后再评论')
+      router.push('/login')
+    } else {
       alert('评论提交失败，请稍后重试')
     }
   }
@@ -149,14 +165,14 @@ onMounted(() => {
   display: flex;
   gap: 20px;
   margin-top: 10px;
-  color: #606266;
-  font-size: 14px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
 }
 
 .tool-description {
   margin-top: 20px;
   line-height: 1.8;
-  color: #303133;
+  color: var(--color-text-primary);
   margin-bottom: 20px;
 }
 
@@ -169,7 +185,7 @@ onMounted(() => {
 }
 
 .url-link {
-  color: #409eff;
+  color: var(--color-primary-600);
   text-decoration: none;
   word-break: break-all;
 }
@@ -198,7 +214,7 @@ onMounted(() => {
 }
 
 .comment-card {
-  border-left: 3px solid #409eff;
+  border-left: 2px solid var(--color-border-default);
 }
 
 .comment-header {
@@ -209,18 +225,19 @@ onMounted(() => {
 }
 
 .comment-author {
-  font-weight: bold;
-  color: #303133;
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
 }
 
 .comment-date {
-  font-size: 12px;
-  color: #606266;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
 }
 
 .comment-content {
-  margin-bottom: 10px;
-  color: #303133;
+  margin-bottom: var(--space-3);
+  color: var(--color-text-secondary);
+  line-height: var(--line-height-relaxed);
 }
 
 .comment-actions {
@@ -231,8 +248,8 @@ onMounted(() => {
 .empty-tip {
   text-align: center;
   padding: 40px 0;
-  color: #909399;
-  background-color: #fafafa;
-  border-radius: 4px;
+  color: var(--color-text-tertiary);
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--border-radius-md);
 }
 </style>
