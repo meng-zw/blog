@@ -22,41 +22,9 @@ ENV BACKEND_HOST=localhost \
 
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# 利用官方镜像的 templates 机制在启动时生成配置：
-# 仅 BACKEND_HOST/BACKEND_PORT 会被替换为环境变量，$uri 等 Nginx 内置变量不受影响
-RUN <<'NGINX_CONF' cat > /etc/nginx/templates/default.conf.template
-server {
-    listen 80;
-    server_name _;
-
-    root /usr/share/nginx/html;
-    index index.html;
-
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript image/svg+xml;
-    gzip_min_length 1k;
-
-    # 带 hash 的构建产物内容不变，启用长缓存
-    location /assets/ {
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-    }
-
-    # Vue Router history 模式：刷新或直接访问子路由时回退到 index.html
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    # 后端 API 反向代理，对应 vite.config.ts 中 /api -> http://localhost:8081 的开发代理
-    location /api/ {
-        proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-NGINX_CONF
+# Nginx 配置模板：容器启动时由官方镜像的 templates 机制(envsubst)生成 /etc/nginx/conf.d/default.conf，
+# 仅 BACKEND_HOST/BACKEND_PORT 会被替换为环境变量值，$uri 等 Nginx 内置变量不受影响
+COPY nginx/default.conf.template /etc/nginx/templates/default.conf.template
 
 EXPOSE 80
 
