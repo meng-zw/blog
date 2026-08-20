@@ -9,12 +9,14 @@
         </div>
         
         <el-form 
+          ref="formRef"
           :model="loginForm" 
+          :rules="rules"
           label-position="top"
           class="login-form"
           @submit.prevent="login"
         >
-          <el-form-item label="用户名" required>
+          <el-form-item label="用户名" prop="username">
             <el-input 
               v-model="loginForm.username" 
               placeholder="请输入用户名"
@@ -27,7 +29,7 @@
             </el-input>
           </el-form-item>
           
-          <el-form-item label="密码" required>
+          <el-form-item label="密码" prop="password">
             <el-input 
               v-model="loginForm.password" 
               type="password" 
@@ -66,29 +68,32 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from '../utils/axios'
-import { ElMessage } from 'element-plus'
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import Logo from '../components/Logo.vue'
 import Icon from '../components/Icon.vue'
 
 const router = useRouter()
 const loading = ref(false)
 const rememberMe = ref(false)
+const formRef = ref<FormInstance>()
 
 const loginForm = ref({
   username: '',
   password: ''
 })
 
+const rules: FormRules = {
+  username: [
+    { required: true, message: '请输入用户名', trigger: 'blur' }
+  ],
+  password: [
+    { required: true, message: '请输入密码', trigger: 'blur' }
+  ]
+}
+
 const login = async () => {
-  if (!loginForm.value.username.trim()) {
-    ElMessage.warning('请输入用户名')
-    return
-  }
-  
-  if (!loginForm.value.password.trim()) {
-    ElMessage.warning('请输入密码')
-    return
-  }
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid) return
   
   loading.value = true
   
@@ -96,6 +101,7 @@ const login = async () => {
     const response = await axios.post('/auth/login', loginForm.value)
     if (response && response.token) {
       localStorage.setItem('token', response.token)
+      localStorage.setItem('username', response.username || loginForm.value.username)
       ElMessage.success('登录成功')
       router.push('/')
     } else {
@@ -104,7 +110,7 @@ const login = async () => {
     }
   } catch (error: any) {
     console.error('登录失败:', error)
-    ElMessage.error(error.response?.data?.message || '登录失败，请检查用户名和密码')
+    ElMessage.error(error.message || '登录失败，请检查用户名和密码')
   } finally {
     loading.value = false
   }

@@ -109,7 +109,7 @@
                 <h4 class="tool-item__name" @click="goToTool(tool.id)">{{ tool.name }}</h4>
                 <p class="tool-item__desc">{{ tool.description.substring(0, 40) }}...</p>
               </div>
-              <el-button type="success" size="small" text @click="goToTool(tool.id)">
+              <el-button type="success" size="small" text @click="openToolUrl(tool)">
                 <Icon name="arrow-right" size="sm" />
               </el-button>
             </div>
@@ -139,6 +139,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
 import Icon from '../components/Icon.vue'
 
@@ -156,6 +157,14 @@ const goToArticleList = () => {
 
 const goToTool = (id: number) => {
   router.push(`/tool/${id}`)
+}
+
+const openToolUrl = (tool: any) => {
+  if (!tool?.url) {
+    ElMessage.info('该工具暂无链接')
+    return
+  }
+  window.open(tool.url, '_blank', 'noopener noreferrer')
 }
 
 const goToWrite = () => {

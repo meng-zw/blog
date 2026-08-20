@@ -3,7 +3,12 @@
     <h1>工具详情</h1>
     <el-card shadow="hover" v-if="tool">
       <template #header>
-        <h2>{{ tool.name }}</h2>
+        <div class="tool-header">
+          <h2>{{ tool.name }}</h2>
+          <el-button v-if="isOwner" type="primary" size="small" @click="goToEdit">
+            编辑工具
+          </el-button>
+        </div>
         <div class="tool-meta">
           <span>{{ tool.created_at }}</span>
           <span>浏览量：{{ tool.view_count }}</span>
@@ -57,8 +62,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
 
 const route = useRoute()
@@ -69,6 +75,19 @@ const commentForm = ref({
   content: ''
 })
 
+// 仅工具分享者本人可见编辑入口
+const isOwner = computed(() => {
+  if (!tool.value?.user?.username) return false
+  const currentUsername = localStorage.getItem('username')
+  return !!currentUsername && tool.value.user.username === currentUsername
+})
+
+const goToEdit = () => {
+  if (tool.value) {
+    router.push(`/tool/${tool.value.id}/edit`)
+  }
+}
+
 const openToolUrl = () => {
   if (tool.value) {
     window.open(tool.value.url, '_blank', 'noopener noreferrer')
@@ -77,13 +96,14 @@ const openToolUrl = () => {
 
 const submitComment = async () => {
   if (!commentForm.value.content.trim()) {
+    ElMessage.warning('评论内容不能为空')
     return
   }
   
   // 检查登录状态
   const token = localStorage.getItem('token')
   if (!token) {
-    alert('请先登录后再评论')
+    ElMessage.warning('请先登录后再评论')
     router.push('/login')
     return
   }
@@ -99,13 +119,13 @@ const submitComment = async () => {
     if (tool.value) {
       tool.value.comment_count++
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('提交评论失败:', error)
     if (error.response?.status === 403 || error.response?.status === 401) {
-      alert('请先登录后再评论')
+      ElMessage.warning('请先登录后再评论')
       router.push('/login')
     } else {
-      alert('评论提交失败，请稍后重试')
+      ElMessage.error(error.message || '评论提交失败，请稍后重试')
     }
   }
 }
@@ -159,6 +179,19 @@ onMounted(() => {
 <style scoped>
 .tool-detail {
   text-align: left;
+}
+
+.tool-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.tool-header h2 {
+  margin: 0;
+  font-family: var(--font-family-display);
+  letter-spacing: var(--letter-spacing-wide);
 }
 
 .tool-meta {

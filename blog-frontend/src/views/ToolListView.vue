@@ -37,10 +37,15 @@
               {{ formatUrl(tool.url) }}
             </a>
           </div>
-          <el-button type="success" size="small" @click="goToTool(tool.id)">
-            查看详情
-            <Icon name="arrow-right" size="xs" />
-          </el-button>
+          <div class="tool-card__actions">
+            <el-button type="success" size="small" @click="openToolUrl(tool)">
+              访问工具
+              <Icon name="arrow-right" size="xs" />
+            </el-button>
+            <el-button size="small" text @click="goToTool(tool.id)">
+              详情
+            </el-button>
+          </div>
         </div>
       </el-card>
     </div>
@@ -62,6 +67,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
 import Icon from '../components/Icon.vue'
 
@@ -83,6 +89,14 @@ const getToolIconBg = (index: number) => {
 
 const goToTool = (id: number) => {
   router.push(`/tool/${id}`)
+}
+
+const openToolUrl = (tool: any) => {
+  if (!tool?.url) {
+    ElMessage.info('该工具暂无链接')
+    return
+  }
+  window.open(tool.url, '_blank', 'noopener noreferrer')
 }
 
 const goToShareTool = () => {
@@ -247,6 +261,13 @@ onMounted(async () => {
   align-items: center;
   padding-top: var(--space-4);
   border-top: 1px solid var(--color-border-light);
+}
+
+.tool-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
 }
 
 .tool-card__url {

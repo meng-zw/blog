@@ -251,6 +251,7 @@ const loadComments = async () => {
 
 const submitComment = async () => {
   if (!commentForm.value.content.trim()) {
+    ElMessage.warning('评论内容不能为空')
     return
   }
   
@@ -272,9 +273,9 @@ const submitComment = async () => {
     comments.value.unshift(newComment)
     commentForm.value.content = ''
     ElMessage.success('评论发布成功')
-  } catch (error) {
+  } catch (error: any) {
     console.error('提交评论失败:', error)
-    ElMessage.error('评论发布失败，请稍后重试')
+    ElMessage.error(error.message || '评论发布失败，请稍后重试')
   } finally {
     submitting.value = false
   }

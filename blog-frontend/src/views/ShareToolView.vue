@@ -2,12 +2,12 @@
   <div class="share-tool">
     <h1>分享工具</h1>
     <el-card shadow="hover">
-      <el-form :model="toolForm" label-width="80px">
-        <el-form-item label="工具名称">
-          <el-input v-model="toolForm.name" placeholder="请输入工具名称" maxlength="100" show-word-limit></el-input>
+      <el-form ref="formRef" :model="toolForm" :rules="rules" label-width="80px">
+        <el-form-item label="工具名称" prop="name">
+          <el-input v-model="toolForm.name" placeholder="请输入工具名称（2-100 个字符）" maxlength="100" show-word-limit></el-input>
         </el-form-item>
         
-        <el-form-item label="工具描述">
+        <el-form-item label="工具描述" prop="description">
           <el-input
             type="textarea"
             v-model="toolForm.description"
@@ -17,11 +17,11 @@
           ></el-input>
         </el-form-item>
         
-        <el-form-item label="工具链接">
-          <el-input v-model="toolForm.url" placeholder="请输入工具链接" maxlength="200" show-word-limit></el-input>
+        <el-form-item label="工具链接" prop="url">
+          <el-input v-model="toolForm.url" placeholder="请输入工具链接（以 http:// 或 https:// 开头）" maxlength="200" show-word-limit></el-input>
         </el-form-item>
         
-        <el-form-item label="工具分类">
+        <el-form-item label="工具分类" prop="category_id">
           <el-select v-model="toolForm.category_id" placeholder="请选择工具分类">
             <el-option
               v-for="category in categories"
@@ -44,9 +44,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import axios from '../utils/axios'
 
 const router = useRouter()
+const formRef = ref<FormInstance>()
+
 const toolForm = ref({
   name: '',
   description: '',
@@ -54,11 +57,31 @@ const toolForm = ref({
   category_id: ''
 })
 
+const urlRegex = /^https?:\/\/\S+\.\S+/
+
+const rules: FormRules = {
+  name: [
+    { required: true, message: '请输入工具名称', trigger: 'blur' },
+    { min: 2, max: 100, message: '工具名称长度需在 2 到 100 个字符之间', trigger: 'blur' }
+  ],
+  description: [
+    { required: true, message: '请输入工具描述', trigger: 'blur' },
+    { max: 500, message: '描述不能超过 500 个字符', trigger: 'blur' }
+  ],
+  url: [
+    { required: true, message: '请输入工具链接', trigger: 'blur' },
+    { pattern: urlRegex, message: '链接需以 http:// 或 https:// 开头，且包含有效域名', trigger: 'blur' }
+  ],
+  category_id: [
+    { required: true, message: '请选择工具分类', trigger: 'change' }
+  ]
+}
+
 // 检查登录状态
 const checkLogin = () => {
   const token = localStorage.getItem('token')
   if (!token) {
-    alert('请先登录后再分享工具')
+    ElMessage.warning('请先登录后再分享工具')
     router.push('/login')
     return false
   }
@@ -84,38 +107,21 @@ const loadCategories = async () => {
 }
 
 const submitTool = async () => {
-  if (!toolForm.value.name.trim()) {
-    alert('请输入工具名称')
-    return
-  }
-  
-  if (!toolForm.value.description.trim()) {
-    alert('请输入工具描述')
-    return
-  }
-  
-  if (!toolForm.value.url.trim()) {
-    alert('请输入工具链接')
-    return
-  }
-  
-  if (!toolForm.value.category_id) {
-    alert('请选择工具分类')
-    return
-  }
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid) return
   
   try {
     // 真实API调用分享工具
     await axios.post('/tools', toolForm.value)
-    alert('工具分享成功')
+    ElMessage.success('工具分享成功')
     router.push('/tool')
   } catch (error: any) {
     console.error('分享工具失败:', error)
     if (error.response?.status === 403 || error.response?.status === 401) {
-      alert('请先登录后再分享工具')
+      ElMessage.warning('请先登录后再分享工具')
       router.push('/login')
     } else {
-      alert(error.response?.data?.message || '工具分享失败，请稍后重试')
+      ElMessage.error(error.message || '工具分享失败，请稍后重试')
     }
   }
 }

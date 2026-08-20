@@ -33,6 +33,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../views/ToolDetailView.vue')
   },
   {
+    path: '/tool/:id/edit',
+    name: 'edit-tool',
+    component: () => import('../views/EditToolView.vue')
+  },
+  {
     path: '/share-tool',
     name: 'share-tool',
     component: () => import('../views/ShareToolView.vue')

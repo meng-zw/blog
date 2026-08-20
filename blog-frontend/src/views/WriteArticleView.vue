@@ -2,12 +2,12 @@
   <div class="write-article">
     <h1>写文章</h1>
     <el-card shadow="hover">
-      <el-form :model="articleForm" label-width="80px">
-        <el-form-item label="标题">
-          <el-input v-model="articleForm.title" placeholder="请输入文章标题" maxlength="100" show-word-limit></el-input>
+      <el-form ref="formRef" :model="articleForm" :rules="rules" label-width="80px">
+        <el-form-item label="标题" prop="title">
+          <el-input v-model="articleForm.title" placeholder="请输入文章标题（2-100 个字符）" maxlength="100" show-word-limit></el-input>
         </el-form-item>
         
-        <el-form-item label="分类">
+        <el-form-item label="分类" prop="category_id">
           <el-select v-model="articleForm.category_id" placeholder="请选择分类">
             <el-option
               v-for="category in categories"
@@ -54,12 +54,13 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import Vditor from 'vditor'
-import { ElMessage } from 'element-plus'
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import 'vditor/dist/index.css'
 import axios from '../utils/axios'
 
 const router = useRouter()
 const editorRef = ref<HTMLElement | null>(null)
+const formRef = ref<FormInstance>()
 let vditor: Vditor | null = null
 
 // 检查登录状态
@@ -80,6 +81,16 @@ const articleForm = ref({
   content: '',
   html_content: ''
 })
+
+const rules: FormRules = {
+  title: [
+    { required: true, message: '请输入文章标题', trigger: 'blur' },
+    { min: 2, max: 100, message: '标题长度需在 2 到 100 个字符之间', trigger: 'blur' }
+  ],
+  category_id: [
+    { required: true, message: '请选择文章分类', trigger: 'change' }
+  ]
+}
 
 const categories = ref<any[]>([])
 const tags = ref<any[]>([])
@@ -131,19 +142,12 @@ const loadCategoriesAndTags = async () => {
 }
 
 const submitArticle = async () => {
-  if (!articleForm.value.title.trim()) {
-    alert('请输入文章标题')
-    return
-  }
-  
-  if (!articleForm.value.category_id) {
-    alert('请选择文章分类')
-    return
-  }
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid) return
   
   const content = vditor?.getValue() || ''
   if (!content.trim()) {
-    alert('请输入文章内容')
+    ElMessage.warning('请输入文章内容')
     return
   }
   
@@ -154,11 +158,11 @@ const submitArticle = async () => {
   try {
     // 真实API调用发布文章
     await axios.post('/articles', articleForm.value)
-    alert('文章发布成功')
+    ElMessage.success('文章发布成功')
     router.push('/')
   } catch (error: any) {
     console.error('发布文章失败:', error)
-    alert(error.response?.data?.message || '文章发布失败，请稍后重试')
+    ElMessage.error(error.message || '文章发布失败，请稍后重试')
   }
 }
 

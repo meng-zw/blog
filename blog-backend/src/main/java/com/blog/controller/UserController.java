@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,13 +48,13 @@ public class UserController {
         // 检查用户名是否已存在
         User existingUser = userRepository.findByUsername(registerRequest.getUsername());
         if (existingUser != null) {
-            return ResponseEntity.badRequest().body("Username is already taken");
+            return ResponseEntity.badRequest().body(errorBody("用户名已被注册"));
         }
 
         // 检查邮箱是否已存在
         User existingEmailUser = userRepository.findByEmail(registerRequest.getEmail());
         if (existingEmailUser != null) {
-            return ResponseEntity.badRequest().body("Email is already in use");
+            return ResponseEntity.badRequest().body(errorBody("邮箱已被注册，请更换邮箱或直接登录"));
         }
 
         // 创建新用户
@@ -78,9 +79,14 @@ public class UserController {
      */
     @PostMapping("/login")
     public ResponseEntity<?> loginUser(@RequestBody LoginRequest loginRequest) {
-        // 认证用户
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()));
+        // 认证用户，失败时返回明确的错误信息
+        Authentication authentication;
+        try {
+            authentication = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()));
+        } catch (AuthenticationException e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorBody("用户名或密码错误"));
+        }
 
         // 设置认证上下文
         SecurityContextHolder.getContext().setAuthentication(authentication);
@@ -92,8 +98,18 @@ public class UserController {
         Map<String, String> response = new HashMap<>();
         response.put("token", jwt);
         response.put("tokenType", "Bearer");
+        response.put("username", loginRequest.getUsername());
 
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 构造统一的错误响应体，保证前端能从 message 字段读到具体原因
+     */
+    private Map<String, String> errorBody(String message) {
+        Map<String, String> body = new HashMap<>();
+        body.put("message", message);
+        return body;
     }
 
     /**

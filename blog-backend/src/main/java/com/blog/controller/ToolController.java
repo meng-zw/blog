@@ -49,13 +49,13 @@ public class ToolController {
         // 查询用户
         User user = userRepository.findByUsername(username);
         if (user == null) {
-            return ResponseEntity.badRequest().body("User not found");
+            return ResponseEntity.badRequest().body(errorBody("用户不存在"));
         }
 
         // 查询分类
         Category category = categoryRepository.findById(toolDTO.getCategoryId()).orElse(null);
         if (category == null) {
-            return ResponseEntity.badRequest().body("Category not found");
+            return ResponseEntity.badRequest().body(errorBody("工具分类不存在"));
         }
 
         // 创建工具
@@ -162,13 +162,13 @@ public class ToolController {
 
         // 检查权限
         if (!tool.getUser().getUsername().equals(username)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("You don't have permission to update this tool");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(errorBody("没有权限编辑他人分享的工具"));
         }
 
         // 查询分类
         Category category = categoryRepository.findById(toolDTO.getCategoryId()).orElse(null);
         if (category == null) {
-            return ResponseEntity.badRequest().body("Category not found");
+            return ResponseEntity.badRequest().body(errorBody("工具分类不存在"));
         }
 
         // 更新工具
@@ -203,13 +203,22 @@ public class ToolController {
 
         // 检查权限
         if (!tool.getUser().getUsername().equals(username)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("You don't have permission to delete this tool");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(errorBody("没有权限删除他人分享的工具"));
         }
 
         // 删除工具
         toolRepository.deleteById(id);
 
         return ResponseEntity.ok("Tool deleted successfully");
+    }
+
+    /**
+     * 构造统一的错误响应体，保证前端能从 message 字段读到具体原因
+     */
+    private java.util.Map<String, String> errorBody(String message) {
+        java.util.Map<String, String> body = new java.util.HashMap<>();
+        body.put("message", message);
+        return body;
     }
 
     /**
