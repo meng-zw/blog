@@ -102,6 +102,9 @@ const login = async () => {
     if (response && response.token) {
       localStorage.setItem('token', response.token)
       localStorage.setItem('username', response.username || loginForm.value.username)
+      if (response.role) {
+        localStorage.setItem('role', response.role)
+      }
       ElMessage.success('登录成功')
       router.push('/')
     } else {

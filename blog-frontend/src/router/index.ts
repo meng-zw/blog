@@ -18,6 +18,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../views/ArticleDetailView.vue')
   },
   {
+    path: '/article/:id/edit',
+    name: 'edit-article',
+    component: () => import('../views/EditArticleView.vue')
+  },
+  {
     path: '/write',
     name: 'write-article',
     component: () => import('../views/WriteArticleView.vue')
@@ -51,6 +56,16 @@ const routes: RouteRecordRaw[] = [
     path: '/register',
     name: 'register',
     component: () => import('../views/RegisterView.vue')
+  },
+  {
+    path: '/profile',
+    name: 'profile',
+    component: () => import('../views/ProfileView.vue')
+  },
+  {
+    path: '/admin',
+    name: 'admin',
+    component: () => import('../views/AdminView.vue')
   }
 ]
 

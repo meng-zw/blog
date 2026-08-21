@@ -69,7 +69,7 @@ public class UserController {
         // 保存用户
         userRepository.save(user);
 
-        return ResponseEntity.status(HttpStatus.CREATED).body("User registered successfully");
+        return ResponseEntity.status(HttpStatus.CREATED).body(errorBody("注册成功"));
     }
 
     /**
@@ -94,13 +94,70 @@ public class UserController {
         // 生成JWT令牌
         String jwt = jwtUtils.generateToken(loginRequest.getUsername());
 
+        // 获取用户信息（包括角色）
+        User user = userRepository.findByUsername(loginRequest.getUsername());
+
         // 构建响应
-        Map<String, String> response = new HashMap<>();
+        Map<String, Object> response = new HashMap<>();
         response.put("token", jwt);
         response.put("tokenType", "Bearer");
         response.put("username", loginRequest.getUsername());
+        response.put("role", user != null ? user.getRole() : "user");
 
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 获取当前用户信息
+     * @return 当前用户信息
+     */
+    @GetMapping("/me")
+    public ResponseEntity<?> getCurrentUser() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = authentication.getName();
+        User user = userRepository.findByUsername(username);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorBody("用户未登录"));
+        }
+        // 返回用户信息（不包含密码）
+        Map<String, Object> result = new HashMap<>();
+        result.put("id", user.getId());
+        result.put("username", user.getUsername());
+        result.put("email", user.getEmail());
+        result.put("phone", user.getPhone());
+        result.put("avatar", user.getAvatar());
+        result.put("role", user.getRole());
+        result.put("createdAt", user.getCreatedAt());
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * 更新用户个人信息
+     * @param updateRequest 更新请求
+     * @return 更新结果
+     */
+    @PutMapping("/me")
+    public ResponseEntity<?> updateCurrentUser(@RequestBody UpdateProfileRequest updateRequest) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = authentication.getName();
+        User user = userRepository.findByUsername(username);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorBody("用户未登录"));
+        }
+        
+        // 更新信息
+        if (updateRequest.getEmail() != null) {
+            user.setEmail(updateRequest.getEmail());
+        }
+        if (updateRequest.getPhone() != null) {
+            user.setPhone(updateRequest.getPhone());
+        }
+        if (updateRequest.getAvatar() != null) {
+            user.setAvatar(updateRequest.getAvatar());
+        }
+        
+        userRepository.save(user);
+        return ResponseEntity.ok(errorBody("个人信息更新成功"));
     }
 
     /**
@@ -177,6 +234,39 @@ public class UserController {
 
         public void setPassword(String password) {
             this.password = password;
+        }
+    }
+
+    /**
+     * 更新个人信息请求DTO
+     */
+    public static class UpdateProfileRequest {
+        private String email;
+        private String phone;
+        private String avatar;
+
+        public String getEmail() {
+            return email;
+        }
+
+        public void setEmail(String email) {
+            this.email = email;
+        }
+
+        public String getPhone() {
+            return phone;
+        }
+
+        public void setPhone(String phone) {
+            this.phone = phone;
+        }
+
+        public String getAvatar() {
+            return avatar;
+        }
+
+        public void setAvatar(String avatar) {
+            this.avatar = avatar;
         }
     }
 }

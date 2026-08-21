@@ -10,6 +10,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -19,6 +22,8 @@ import java.util.Map;
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     /**
      * 认证失败（用户名或密码错误）
@@ -50,9 +55,11 @@ public class GlobalExceptionHandler {
 
     /**
      * 数据库约束冲突（唯一键重复、非空约束等）
+     * 日志记录具体原因便于排查，前端只返回通用提示避免暴露 SQL 细节
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Map<String, String>> handleDataIntegrityViolation(DataIntegrityViolationException e) {
+        log.warn("数据库约束冲突: {}", e.getMessage(), e);
         return build(HttpStatus.BAD_REQUEST, "数据不合法或已存在，请检查后重试");
     }
 

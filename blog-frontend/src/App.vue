@@ -36,9 +36,13 @@
                   </div>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item command="profile">
+                      <el-dropdown-item command="profile" @click="goToProfile">
                         <Icon name="user" size="sm" />
                         个人中心
+                      </el-dropdown-item>
+                      <el-dropdown-item v-if="isAdmin" command="admin" @click="goToAdmin">
+                        <Icon name="tool" size="sm" />
+                        后台管理
                       </el-dropdown-item>
                       <el-dropdown-item command="settings">
                         <Icon name="tool" size="sm" />
@@ -151,10 +155,6 @@ const navItems: NavItem[] = [
   { index: 'share-tool', label: '分享工具', to: '/share-tool', icon: 'share' }
 ]
 
-const handleSelect = (key: string, keyPath: string[]) => {
-  activeIndex.value = key
-}
-
 const handleNavClick = (index: string) => {
   activeIndex.value = index
   mobileMenuOpen.value = false
@@ -167,6 +167,20 @@ const toggleMobileMenu = () => {
 const goToLogin = () => {
   router.push('/login')
 }
+
+const goToProfile = () => {
+  router.push('/profile')
+}
+
+const goToAdmin = () => {
+  router.push('/admin')
+}
+
+// 检查是否为管理员
+const isAdmin = computed(() => {
+  const role = localStorage.getItem('role')
+  return role === 'admin'
+})
 
 const handleUserCommand = (command: string) => {
   switch (command) {
@@ -182,6 +196,8 @@ const handleUserCommand = (command: string) => {
 
 const logout = () => {
   localStorage.removeItem('token')
+  localStorage.removeItem('role')
+  localStorage.removeItem('username')
   isLoggedIn.value = false
   router.push('/login')
 }

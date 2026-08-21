@@ -54,7 +54,7 @@ public class CommentController {
         // 查询用户
         User user = userRepository.findByUsername(username);
         if (user == null) {
-            return ResponseEntity.badRequest().body("User not found");
+            return ResponseEntity.badRequest().body(errorBody("用户不存在"));
         }
 
         // 创建评论
@@ -63,6 +63,12 @@ public class CommentController {
         comment.setUser(user);
         comment.setTargetId(id);
         comment.setTargetType("article");
+        if (commentDTO.getParentId() != null) {
+            Comment parent = commentRepository.findById(commentDTO.getParentId()).orElse(null);
+            if (parent != null) {
+                comment.setParent(parent);
+            }
+        }
         comment.setCreatedAt(new Date());
         comment.setUpdatedAt(new Date());
 
@@ -98,7 +104,7 @@ public class CommentController {
         // 查询用户
         User user = userRepository.findByUsername(username);
         if (user == null) {
-            return ResponseEntity.badRequest().body("User not found");
+            return ResponseEntity.badRequest().body(errorBody("用户不存在"));
         }
 
         // 创建评论
@@ -107,6 +113,12 @@ public class CommentController {
         comment.setUser(user);
         comment.setTargetId(id);
         comment.setTargetType("tool");
+        if (commentDTO.getParentId() != null) {
+            Comment parent = commentRepository.findById(commentDTO.getParentId()).orElse(null);
+            if (parent != null) {
+                comment.setParent(parent);
+            }
+        }
         comment.setCreatedAt(new Date());
         comment.setUpdatedAt(new Date());
 
@@ -117,10 +129,55 @@ public class CommentController {
     }
 
     /**
+     * 删除评论（仅作者或管理员）
+     * @param id 评论ID
+     */
+    @DeleteMapping("/comments/{id}")
+    public ResponseEntity<?> deleteComment(@PathVariable("id") Long id) {
+        // 获取当前用户
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = authentication.getName();
+
+        Comment comment = commentRepository.findById(id).orElse(null);
+        if (comment == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // 检查权限
+        if (!comment.getUser().getUsername().equals(username)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(errorBody("没有权限删除此评论"));
+        }
+
+        commentRepository.deleteById(id);
+        return ResponseEntity.ok(errorBody("评论删除成功"));
+    }
+
+    /**
+     * 构造统一的错误响应体，保证前端能从 message 字段读到具体原因
+     */
+    private java.util.Map<String, String> errorBody(String message) {
+        java.util.Map<String, String> body = new java.util.HashMap<>();
+        body.put("message", message);
+        return body;
+    }
+
+    /**
+     * 获取评论回复列表
+     * @param parentId 父评论ID
+     * @return 回复列表
+     */
+    @GetMapping("/comments/{parentId}/replies")
+    public ResponseEntity<?> getReplyComments(@PathVariable("parentId") Long parentId) {
+        List<Comment> replies = commentRepository.findByParentIdOrderByCreatedAtDesc(parentId);
+        return ResponseEntity.ok(replies);
+    }
+
+    /**
      * 评论DTO
      */
     public static class CommentDTO {
         private String content;
+        private Long parentId;
 
         public String getContent() {
             return content;
@@ -128,6 +185,14 @@ public class CommentController {
 
         public void setContent(String content) {
             this.content = content;
+        }
+
+        public Long getParentId() {
+            return parentId;
+        }
+
+        public void setParentId(Long parentId) {
+            this.parentId = parentId;
         }
     }
 }

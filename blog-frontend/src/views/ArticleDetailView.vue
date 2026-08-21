@@ -32,17 +32,33 @@
         
         <div class="article__content" v-html="article.html_content"></div>
         
+        <div class="article__header-actions" v-if="isOwner">
+          <el-button type="primary" size="small" @click="goToEdit">
+            <Icon name="edit" size="sm" />
+            编辑文章
+          </el-button>
+          <el-button type="danger" size="small" @click="deleteArticle">
+            <Icon name="delete" size="sm" />
+            删除文章
+          </el-button>
+        </div>
         <footer class="article__footer">
           <div class="article__actions">
-            <el-button type="primary" plain size="large">
+            <el-button 
+              :type="userLikedArticle ? 'danger' : 'primary'" 
+              plain 
+              size="large"
+              @click="toggleLikeArticle"
+            >
               <Icon name="heart" size="sm" />
-              点赞
+              {{ userLikedArticle ? '已点赞' : '点赞' }}
+              <span v-if="article.like_count > 0">({{ article.like_count }})</span>
             </el-button>
             <el-button type="primary" plain size="large">
               <Icon name="bookmark" size="sm" />
               收藏
             </el-button>
-            <el-button type="primary" plain size="large">
+            <el-button type="primary" plain size="large" @click="shareArticle">
               <Icon name="share" size="sm" />
               分享
             </el-button>
@@ -99,15 +115,57 @@
                 <p>{{ comment.content }}</p>
               </div>
               <div class="comment-card__actions">
-                <el-button type="primary" text size="small" @click="replyComment(comment)">
+                <el-button type="primary" text size="small" @click="showReplyInput(comment)">
                   <Icon name="edit" size="xs" />
                   回复
                 </el-button>
+                <el-button 
+                  v-if="isCommentOwner(comment)" 
+                  type="danger" 
+                  text 
+                  size="small" 
+                  @click="deleteComment(comment.id)"
+                >
+                  <Icon name="delete" size="xs" />
+                  删除
+                </el-button>
+              </div>
+              <!-- 回复输入框 -->
+              <div v-if="replyingComment?.id === comment.id" class="reply-input">
+                <el-input
+                  v-model="replyContent"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="回复 @{{ comment.username }}..."
+                ></el-input>
+                <div class="reply-actions">
+                  <el-button size="small" @click="cancelReply">取消</el-button>
+                  <el-button type="primary" size="small" @click="submitReply(comment)" :loading="submitting">
+                    发布回复
+                  </el-button>
+                </div>
+              </div>
+              <!-- 回复列表 -->
+              <div v-if="comment.replies && comment.replies.length > 0" class="reply-list">
+                <div 
+                  v-for="reply in comment.replies" 
+                  :key="reply.id" 
+                  class="reply-item"
+                >
+                  <div class="reply-header">
+                    <span class="reply-author">{{ reply.username }}</span>
+                    <span class="reply-date">{{ formatDateTime(reply.created_at) }}</span>
+                  </div>
+                  <div class="reply-content">
+                    <span class="reply-to">回复</span>
+                    {{ reply.content }}
+                  </div>
+                </div>
               </div>
             </div>
           </transition-group>
-          
-          <div v-if="comments.length === 0" class="empty-comments">
+
+          <div v-if="comments.length === 0 && !loadingComments" class="empty-comments">
             <Icon name="comment" size="xl" />
             <p>暂无评论，快来抢沙发吧！</p>
           </div>
@@ -120,7 +178,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import axios from '../utils/axios'
 import Icon from '../components/Icon.vue'
 
@@ -130,12 +188,117 @@ const article = ref<any>(null)
 const comments = ref<any[]>([])
 const commentForm = ref({ content: '' })
 const submitting = ref(false)
+const loadingComments = ref(false)
+const replyingComment = ref<any>(null)
+const replyContent = ref('')
 
 const readingTime = computed(() => {
   if (!article.value?.content) return 1
   const words = article.value.content.length
   return Math.max(1, Math.ceil(words / 500))
 })
+
+// 判断当前用户是否是文章作者
+const isOwner = computed(() => {
+  if (!article.value?.user?.username) return false
+  const currentUsername = localStorage.getItem('username')
+  return !!currentUsername && article.value.user.username === currentUsername
+})
+
+// 点赞相关
+const userLikedArticle = ref(false)
+const likeLoading = ref(false)
+
+const checkLikeStatus = async () => {
+  const token = localStorage.getItem('token')
+  if (!token) return
+  try {
+    // 这里可以通过一个接口检查当前用户是否已点赞
+    // 暂时简化处理，实际项目中可以添加 /articles/{id}/liked 接口
+    const liked = await axios.get(`/articles/${route.params.id}/liked`)
+    userLikedArticle.value = liked.liked || false
+  } catch (error) {
+    userLikedArticle.value = false
+  }
+}
+
+const toggleLikeArticle = async () => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    ElMessage.warning('请先登录后再点赞')
+    router.push('/login')
+    return
+  }
+
+  likeLoading.value = true
+  try {
+    if (userLikedArticle.value) {
+      // 取消点赞
+      await axios.delete(`/articles/${route.params.id}/like`)
+      userLikedArticle.value = false
+      if (article.value) {
+        article.value.like_count--
+      }
+      ElMessage.success('已取消点赞')
+    } else {
+      // 点赞
+      await axios.post(`/articles/${route.params.id}/like`)
+      userLikedArticle.value = true
+      if (article.value) {
+        article.value.like_count++
+      }
+      ElMessage.success('点赞成功')
+    }
+  } catch (error: any) {
+    console.error('点赞操作失败:', error)
+    ElMessage.error(error.message || '操作失败，请稍后重试')
+  } finally {
+    likeLoading.value = false
+  }
+}
+
+const shareArticle = () => {
+  const url = window.location.href
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(() => {
+      ElMessage.success('链接已复制到剪贴板')
+    }).catch(() => {
+      ElMessage.error('复制失败，请手动复制链接')
+    })
+  } else {
+    // 降级方案
+    const input = document.createElement('input')
+    input.value = url
+    document.body.appendChild(input)
+    input.select()
+    document.execCommand('copy')
+    document.body.removeChild(input)
+    ElMessage.success('链接已复制到剪贴板')
+  }
+}
+
+const goToEdit = () => {
+  router.push(`/article/${route.params.id}/edit`)
+}
+
+const deleteArticle = async () => {
+  try {
+    await ElMessageBox.confirm('确定要删除这篇文章吗？删除后无法恢复。', '提示', {
+      confirmButtonText: '确定删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    await axios.delete(`/articles/${route.params.id}`)
+    ElMessage.success('文章已删除')
+    router.push('/article')
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('删除文章失败:', error)
+      ElMessage.error(error.message || '删除文章失败')
+    }
+  }
+}
 
 const goToArticleList = () => {
   router.push('/article')
@@ -281,13 +444,80 @@ const submitComment = async () => {
   }
 }
 
-const replyComment = (comment: any) => {
-  console.log('回复评论:', comment)
+const isCommentOwner = (comment: any) => {
+  const currentUsername = localStorage.getItem('username')
+  return !!currentUsername && comment.username === currentUsername
 }
 
-onMounted(() => {
-  loadArticle()
-  loadComments()
+const showReplyInput = (comment: any) => {
+  replyingComment.value = comment
+  replyContent.value = ''
+}
+
+const cancelReply = () => {
+  replyingComment.value = null
+  replyContent.value = ''
+}
+
+const submitReply = async (parentComment: any) => {
+  if (!replyContent.value.trim()) {
+    ElMessage.warning('回复内容不能为空')
+    return
+  }
+
+  const token = localStorage.getItem('token')
+  if (!token) {
+    ElMessage.warning('请先登录后再回复')
+    router.push('/login')
+    return
+  }
+
+  submitting.value = true
+  try {
+    const id = route.params.id
+    const newComment = await axios.post(`/articles/${id}/comments`, {
+      content: replyContent.value,
+      parentId: parentComment.id
+    })
+    // 添加到对应父评论的回复列表
+    if (!parentComment.replies) {
+      parentComment.replies = []
+    }
+    parentComment.replies.push(newComment)
+    cancelReply()
+    ElMessage.success('回复成功')
+  } catch (error: any) {
+    console.error('回复失败:', error)
+    ElMessage.error(error.message || '回复失败，请稍后重试')
+  } finally {
+    submitting.value = false
+  }
+}
+
+const deleteComment = async (commentId: number) => {
+  try {
+    await ElMessageBox.confirm('确定要删除这条评论吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await axios.delete(`/comments/${commentId}`)
+    // 从列表中移除
+    comments.value = comments.value.filter(c => c.id !== commentId)
+    ElMessage.success('评论已删除')
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '删除失败')
+    }
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([
+    loadArticle(),
+    loadComments()
+  ])
+  await checkLikeStatus()
 })
 </script>
 
@@ -539,6 +769,60 @@ onMounted(() => {
 .comment-card__actions {
   display: flex;
   justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.reply-input {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  background-color: var(--color-bg-primary);
+  border-radius: var(--border-radius-md);
+  border: 1px solid var(--color-border-light);
+}
+
+.reply-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.reply-list {
+  margin-top: var(--space-3);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--color-border-light);
+}
+
+.reply-item {
+  padding: var(--space-2) 0;
+}
+
+.reply-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.reply-author {
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.reply-date {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.reply-content {
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.reply-to {
+  color: var(--color-primary-600);
+  margin-right: var(--space-1);
 }
 
 .empty-comments {
@@ -553,6 +837,13 @@ onMounted(() => {
 
 .empty-comments p {
   margin: 0;
+}
+
+.article__header-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .comment-enter-active,

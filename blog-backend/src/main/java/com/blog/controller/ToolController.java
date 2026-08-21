@@ -1,9 +1,13 @@
 package com.blog.controller;
 
 import com.blog.entity.Category;
+import com.blog.entity.LikeRecord;
+import com.blog.entity.Tag;
 import com.blog.entity.Tool;
 import com.blog.entity.User;
 import com.blog.repository.CategoryRepository;
+import com.blog.repository.LikeRepository;
+import com.blog.repository.TagRepository;
 import com.blog.repository.ToolRepository;
 import com.blog.repository.UserRepository;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -35,6 +39,12 @@ public class ToolController {
     @Autowired
     private CategoryRepository categoryRepository;
 
+    @Autowired
+    private TagRepository tagRepository;
+
+    @Autowired
+    private LikeRepository likeRepository;
+
     /**
      * 创建工具
      * @param toolDTO 工具DTO
@@ -65,8 +75,19 @@ public class ToolController {
         tool.setUrl(toolDTO.getUrl());
         tool.setUser(user);
         tool.setCategory(category);
+
+        // 处理标签
+        if (toolDTO.getTagIds() != null && !toolDTO.getTagIds().isEmpty()) {
+            List<Tag> tags = tagRepository.findAllById(toolDTO.getTagIds());
+            if (tags.size() != toolDTO.getTagIds().size()) {
+                return ResponseEntity.badRequest().body(errorBody("部分标签不存在，请重新选择"));
+            }
+            tool.setTags(tags);
+        }
+
         tool.setViewCount(0L);
         tool.setCommentCount(0L);
+        tool.setLikeCount(0L);
         tool.setCreatedAt(new Date());
         tool.setUpdatedAt(new Date());
 
@@ -85,12 +106,21 @@ public class ToolController {
     @GetMapping
     public ResponseEntity<?> getToolList(
             @RequestParam(name = "page", defaultValue = "0") int page,
-            @RequestParam(name = "size", defaultValue = "10") int size) {
+            @RequestParam(name = "size", defaultValue = "10") int size,
+            @RequestParam(name = "tag_id", required = false) Long tagId,
+            @RequestParam(name = "category_id", required = false) Long categoryId) {
+        List<Tool> tools;
+        if (tagId != null) {
+            tools = toolRepository.findByTagId(tagId);
+        } else if (categoryId != null) {
+            tools = toolRepository.findByCategoryId(categoryId);
+        } else {
+            tools = toolRepository.findAllByOrderByCreatedAtDesc();
+        }
         // 计算偏移量
         int offset = page * size;
 
-        // 查询工具列表
-        List<Tool> tools = toolRepository.findAllByOrderByCreatedAtDesc();
+        // 分页处理
         List<Tool> pagedTools = tools.stream()
                 .skip(offset)
                 .limit(size)
@@ -176,12 +206,136 @@ public class ToolController {
         tool.setDescription(toolDTO.getDescription());
         tool.setUrl(toolDTO.getUrl());
         tool.setCategory(category);
+
+        // 处理标签
+        if (toolDTO.getTagIds() != null) {
+            if (toolDTO.getTagIds().isEmpty()) {
+                tool.setTags(new java.util.ArrayList<>());
+            } else {
+                List<Tag> tags = tagRepository.findAllById(toolDTO.getTagIds());
+                tool.setTags(tags);
+            }
+        }
         tool.setUpdatedAt(new Date());
 
         // 保存更新
         toolRepository.save(tool);
 
         return ResponseEntity.ok(tool);
+    }
+
+    /**
+     * 点赞工具
+     * @param id 工具ID
+     * @return 点赞结果
+     */
+    @PostMapping("/{id}/like")
+    public ResponseEntity<?> likeTool(@PathVariable("id") Long id) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = authentication.getName();
+        User user = userRepository.findByUsername(username);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorBody("用户未登录"));
+        }
+
+        Tool tool = toolRepository.findById(id).orElse(null);
+        if (tool == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // 检查是否已点赞
+        java.util.Optional<LikeRecord> existingLike = likeRepository.findByUserIdAndTargetIdAndTargetType(
+                user.getId(), id, "tool");
+        if (existingLike.isPresent()) {
+            return ResponseEntity.badRequest().body(errorBody("您已经点过赞了"));
+        }
+
+        // 创建点赞记录
+        LikeRecord like = new LikeRecord();
+        like.setUser(user);
+        like.setTargetId(id);
+        like.setTargetType("tool");
+        like.setCreatedAt(new Date());
+        likeRepository.save(like);
+
+        // 更新工具点赞数
+        long likeCount = likeRepository.countByTargetIdAndTargetType(id, "tool");
+        tool.setLikeCount(likeCount);
+        toolRepository.save(tool);
+
+        return ResponseEntity.ok(errorBody("点赞成功"));
+    }
+
+    /**
+     * 取消点赞工具
+     * @param id 工具ID
+     * @return 结果
+     */
+    @DeleteMapping("/{id}/like")
+    public ResponseEntity<?> unlikeTool(@PathVariable("id") Long id) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = authentication.getName();
+        User user = userRepository.findByUsername(username);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorBody("用户未登录"));
+        }
+
+        Tool tool = toolRepository.findById(id).orElse(null);
+        if (tool == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // 查找点赞记录
+        java.util.Optional<LikeRecord> existingLike = likeRepository.findByUserIdAndTargetIdAndTargetType(
+                user.getId(), id, "tool");
+        if (existingLike.isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("您还没有点赞"));
+        }
+
+        // 删除点赞记录
+        likeRepository.delete(existingLike.get());
+
+        // 更新工具点赞数
+        long likeCount = likeRepository.countByTargetIdAndTargetType(id, "tool");
+        tool.setLikeCount(likeCount);
+        toolRepository.save(tool);
+
+        return ResponseEntity.ok(errorBody("已取消点赞"));
+    }
+
+    /**
+     * 检查当前用户是否已点赞工具
+     * @param id 工具ID
+     * @return 点赞状态
+     */
+    @GetMapping("/{id}/liked")
+    public ResponseEntity<?> checkToolLike(@PathVariable("id") Long id) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = authentication.getName();
+        User user = userRepository.findByUsername(username);
+
+        if (user == null) {
+            return ResponseEntity.ok(new LikedResponse(false));
+        }
+
+        java.util.Optional<LikeRecord> existingLike = likeRepository.findByUserIdAndTargetIdAndTargetType(
+                user.getId(), id, "tool");
+        return ResponseEntity.ok(new LikedResponse(existingLike.isPresent()));
+    }
+
+    /**
+     * 点赞响应DTO
+     */
+    public static class LikedResponse {
+        private boolean liked;
+
+        public LikedResponse(boolean liked) {
+            this.liked = liked;
+        }
+
+        public boolean isLiked() {
+            return liked;
+        }
     }
 
     /**
@@ -230,6 +384,8 @@ public class ToolController {
         private String url;
         @JsonProperty("category_id")
         private Long categoryId;
+        @JsonProperty("tag_ids")
+        private java.util.List<Long> tagIds;
 
         // getter和setter方法
         public String getName() {
@@ -262,6 +418,14 @@ public class ToolController {
 
         public void setCategoryId(Long categoryId) {
             this.categoryId = categoryId;
+        }
+
+        public java.util.List<Long> getTagIds() {
+            return tagIds;
+        }
+
+        public void setTagIds(java.util.List<Long> tagIds) {
+            this.tagIds = tagIds;
         }
     }
 

@@ -1,12 +1,21 @@
 import axios from 'axios'
+import type { AxiosInstance } from 'axios'
 
-const instance = axios.create({
+// 自定义类型：instance.get/post/put/delete 直接返回 data（因拦截器已剥掉 AxiosResponse 外衣）
+export interface HttpInstance extends AxiosInstance {
+  get<T = any>(url: string, config?: any): Promise<T>
+  post<T = any>(url: string, data?: any, config?: any): Promise<T>
+  put<T = any>(url: string, data?: any, config?: any): Promise<T>
+  delete<T = any>(url: string, config?: any): Promise<T>
+}
+
+const instance: HttpInstance = axios.create({
   baseURL: '/api',
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json'
   }
-})
+}) as HttpInstance
 
 // 请求拦截器
 instance.interceptors.request.use(

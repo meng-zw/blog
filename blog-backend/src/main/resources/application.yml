@@ -24,18 +24,6 @@ spring:
       hibernate:
         format_sql: true
   
-  # Redis配置
-  data:
-    redis:
-      host: localhost
-      port: 6379
-      password: 
-      database: 0
-      # 如果Redis未启动，跳过连接失败
-      timeout: 5000
-  autoconfigure:
-    exclude:
-      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
 
 # 服务器配置
 server:

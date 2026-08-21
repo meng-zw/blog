@@ -10,6 +10,7 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import jakarta.persistence.*;
 import java.util.Date;
+import java.util.List;
 
 /**
  * 文章实体类
@@ -60,6 +61,17 @@ public class Article {
     private Category category;
 
     /**
+     * 标签列表
+     */
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+        name = "article_tag",
+        joinColumns = @JoinColumn(name = "article_id"),
+        inverseJoinColumns = @JoinColumn(name = "tag_id")
+    )
+    private List<Tag> tags;
+
+    /**
      * 浏览量
      */
     @Column(name = "view_count", nullable = false, columnDefinition = "BIGINT DEFAULT 0")
@@ -70,6 +82,12 @@ public class Article {
      */
     @Column(name = "comment_count", nullable = false, columnDefinition = "BIGINT DEFAULT 0")
     private Long commentCount;
+
+    /**
+     * 点赞数
+     */
+    @Column(name = "like_count", nullable = false, columnDefinition = "BIGINT DEFAULT 0")
+    private Long likeCount;
 
     /**
      * 创建时间

@@ -2,9 +2,60 @@
   <div class="tool-list">
     <div class="page-header">
       <div class="page-header__content">
-        <h1 class="page-title">实用工具箱</h1>
-        <p class="page-subtitle">精选各类开发者工具，提升工作效率</p>
+        <h1 class="page-title">{{ isSearching ? '搜索结果' : activeFilter ? `${activeFilter.name}` : '实用工具箱' }}</h1>
+        <p class="page-subtitle">{{ isSearching ? `搜索"${keyword}"的结果` : '精选各类开发者工具，提升工作效率' }}</p>
       </div>
+      <SearchBar
+        v-if="isSearching"
+        :keyword="keyword"
+        @search="handleSearch"
+        @clear="handleClear"
+      />
+    </div>
+
+    <!-- 筛选栏 -->
+    <div class="filter-bar">
+      <div class="filter-group">
+        <span class="filter-label">分类:</span>
+        <el-button
+          :type="!selectedCategoryId ? 'primary' : ''"
+          size="small"
+          @click="selectCategory(null)"
+        >
+          全部
+        </el-button>
+        <el-button
+          v-for="cat in categories"
+          :key="cat.id"
+          :type="selectedCategoryId === cat.id ? 'primary' : ''"
+          size="small"
+          @click="selectCategory(cat.id)"
+        >
+          {{ cat.name }}
+        </el-button>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">标签:</span>
+        <el-button
+          :type="!selectedTagId ? 'primary' : ''"
+          size="small"
+          @click="selectTag(null)"
+        >
+          全部
+        </el-button>
+        <el-button
+          v-for="tag in tags"
+          :key="tag.id"
+          :type="selectedTagId === tag.id ? 'primary' : ''"
+          size="small"
+          @click="selectTag(tag.id)"
+        >
+          {{ tag.name }}
+        </el-button>
+      </div>
+      <el-button v-if="activeFilter" size="small" @click="clearFilter">
+        清除筛选
+      </el-button>
     </div>
 
     <div class="tool-grid">
@@ -65,14 +116,33 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
 import Icon from '../components/Icon.vue'
+import SearchBar from '../components/SearchBar.vue'
 
 const router = useRouter()
 const tools = ref<any[]>([])
+const keyword = ref('')
+const isSearching = ref(false)
+
+// 筛选相关
+const categories = ref<any[]>([])
+const tags = ref<any[]>([])
+const selectedCategoryId = ref<number | null>(null)
+const selectedTagId = ref<number | null>(null)
+
+const activeFilter = computed(() => {
+  if (selectedCategoryId.value) {
+    return categories.value.find(c => c.id === selectedCategoryId.value)
+  }
+  if (selectedTagId.value) {
+    return tags.value.find(t => t.id === selectedTagId.value)
+  }
+  return null
+})
 
 const toolIconBgs = [
   'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
@@ -119,17 +189,78 @@ const formatUrl = (url: string) => {
   }
 }
 
-onMounted(async () => {
+const handleSearch = (searchKeyword: string) => {
+  keyword.value = searchKeyword
+  isSearching.value = true
+  loadTools()
+}
+
+const handleClear = () => {
+  keyword.value = ''
+  isSearching.value = false
+  loadTools()
+}
+
+const selectCategory = (categoryId: number | null) => {
+  selectedCategoryId.value = categoryId
+  selectedTagId.value = null
+  loadTools()
+}
+
+const selectTag = (tagId: number | null) => {
+  selectedTagId.value = tagId
+  selectedCategoryId.value = null
+  loadTools()
+}
+
+const clearFilter = () => {
+  selectedCategoryId.value = null
+  selectedTagId.value = null
+  loadTools()
+}
+
+const loadCategoriesAndTags = async () => {
   try {
-    const res = await axios.get('/tools', {
-      params: { page: 0, size: 100 }
-    })
-    // 后端返回 {tools, total, page, size} 包装对象，取其中的 tools 数组
-    tools.value = res.tools || []
+    const [catRes, tagRes] = await Promise.all([
+      axios.get('/categories/tool'),
+      axios.get('/tags')
+    ])
+    categories.value = catRes
+    tags.value = tagRes
+  } catch (error) {
+    console.error('加载分类和标签失败:', error)
+  }
+}
+
+const loadTools = async () => {
+  try {
+    if (isSearching.value && keyword.value) {
+      // 搜索模式
+      const res = await axios.get('/search/tools', {
+        params: { keyword: keyword.value }
+      })
+      tools.value = res || []
+    } else {
+      // 正常加载，支持分类和标签筛选
+      const params: any = {}
+      if (selectedCategoryId.value) {
+        params.category_id = selectedCategoryId.value
+      }
+      if (selectedTagId.value) {
+        params.tag_id = selectedTagId.value
+      }
+      const res = await axios.get('/tools', { params: { page: 0, size: 100, ...params } })
+      tools.value = res.tools || []
+    }
   } catch (error) {
     console.error('获取工具列表失败:', error)
     tools.value = []
   }
+}
+
+onMounted(async () => {
+  await loadCategoriesAndTags()
+  loadTools()
 })
 </script>
 
@@ -321,6 +452,31 @@ onMounted(async () => {
 .empty-state__description {
   color: var(--color-text-secondary);
   margin: 0 0 var(--space-6);
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  padding: var(--space-4) var(--space-5);
+  background-color: var(--color-bg-primary);
+  border-radius: var(--border-radius-lg);
+  margin-bottom: var(--space-6);
+  border: 1px solid var(--color-border-light);
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.filter-label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
 }
 
 @media (max-width: 768px) {

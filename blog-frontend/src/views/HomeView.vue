@@ -5,14 +5,7 @@
         <h1 class="hero__title">探索 · 分享 · 成长</h1>
         <p class="hero__subtitle">在这里，记录技术足迹，分享实用工具，与志同道合的开发者一起进步</p>
         <div class="hero__actions">
-          <el-button type="primary" size="large" @click="goToWrite">
-            <Icon name="write" size="sm" />
-            写文章
-          </el-button>
-          <el-button size="large" @click="goToTools">
-            <Icon name="tool" size="sm" />
-            发现工具
-          </el-button>
+          <SearchBar placeholder="搜索文章或工具..." @search="handleSearch" @clear="handleClear" />
         </div>
       </div>
     </section>
@@ -22,18 +15,22 @@
         <div class="section-header">
           <div class="section-header__left">
             <Icon name="article" size="lg" color="primary" />
-            <h2 class="section-title">最新文章</h2>
+            <h2 class="section-title">{{ isSearching ? '搜索结果' : '最新文章' }}</h2>
           </div>
           <router-link to="/article" class="section-link">
             查看更多
             <Icon name="arrow-right" size="sm" />
           </router-link>
         </div>
-        
+
+        <div v-if="isSearching" class="search-result-hint">
+          <p>共找到 {{ articles.length }} 篇相关文章，<router-link to="/article" class="view-all">查看全部</router-link></p>
+        </div>
+
         <div class="article-grid">
-          <el-card 
-            v-for="(article, index) in articles" 
-            :key="article.id" 
+          <el-card
+            v-for="(article, index) in articles"
+            :key="article.id"
             class="article-card"
             :style="{ animationDelay: `${index * 100}ms` }"
             shadow="hover"
@@ -52,16 +49,16 @@
               <h3 class="article-card__title" @click="goToArticle(article.id)">
                 {{ article.title }}
               </h3>
-              <p class="article-card__excerpt">{{ article.content.substring(0, 120) }}...</p>
+              <p class="article-card__excerpt">{{ article.content?.substring(0, 120) }}...</p>
               <div class="article-card__footer">
                 <div class="article-card__stats">
                   <span>
                     <Icon name="eye" size="xs" />
-                    {{ article.view_count || Math.floor(Math.random() * 1000) }}
+                    {{ article.view_count || 0 }}
                   </span>
                   <span>
                     <Icon name="comment" size="xs" />
-                    {{ article.comment_count || Math.floor(Math.random() * 50) }}
+                    {{ article.comment_count || 0 }}
                   </span>
                 </div>
                 <el-button type="primary" size="small" @click="goToArticle(article.id)">
@@ -91,14 +88,18 @@
           <div class="section-header">
             <div class="section-header__left">
               <Icon name="tool" size="md" color="success" />
-              <h3 class="section-title">热门工具</h3>
+              <h3 class="section-title">{{ isSearching ? '相关工具' : '热门工具' }}</h3>
             </div>
           </div>
-          
+
+          <div v-if="isSearching && tools.length > 0" class="search-result-hint">
+            <p>共找到 {{ tools.length }} 个相关工具，<router-link to="/tool" class="view-all">查看全部</router-link></p>
+          </div>
+
           <div class="tool-list">
-            <div 
-              v-for="(tool, index) in tools" 
-              :key="tool.id" 
+            <div
+              v-for="(tool, index) in tools"
+              :key="tool.id"
               class="tool-item"
               :style="{ animationDelay: `${index * 50}ms` }"
             >
@@ -107,14 +108,14 @@
               </div>
               <div class="tool-item__content">
                 <h4 class="tool-item__name" @click="goToTool(tool.id)">{{ tool.name }}</h4>
-                <p class="tool-item__desc">{{ tool.description.substring(0, 40) }}...</p>
+                <p class="tool-item__desc">{{ tool.description?.substring(0, 40) }}...</p>
               </div>
               <el-button type="success" size="small" text @click="openToolUrl(tool)">
                 <Icon name="arrow-right" size="sm" />
               </el-button>
             </div>
           </div>
-          
+
           <router-link to="/tool" class="sidebar__link">
             查看更多工具
             <Icon name="arrow-right" size="sm" />
@@ -142,10 +143,13 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import axios from '../utils/axios'
 import Icon from '../components/Icon.vue'
+import SearchBar from '../components/SearchBar.vue'
 
 const router = useRouter()
 const articles = ref<any[]>([])
 const tools = ref<any[]>([])
+const isSearching = ref(false)
+const searchKeyword = ref('')
 
 const goToArticle = (id: number) => {
   router.push(`/article/${id}`)
@@ -171,10 +175,6 @@ const goToWrite = () => {
   router.push('/write')
 }
 
-const goToTools = () => {
-  router.push('/tool')
-}
-
 const goToShareTool = () => {
   router.push('/share-tool')
 }
@@ -185,63 +185,43 @@ const formatDate = (dateStr: string) => {
   return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 
-onMounted(async () => {
+const handleSearch = async (keyword: string) => {
+  searchKeyword.value = keyword
+  isSearching.value = true
+  try {
+    const [articlesRes, toolsRes] = await Promise.all([
+      axios.get('/search/articles', { params: { keyword } }),
+      axios.get('/search/tools', { params: { keyword } })
+    ])
+    articles.value = articlesRes || []
+    tools.value = toolsRes || []
+  } catch (error) {
+    console.error('搜索失败:', error)
+    articles.value = []
+    tools.value = []
+  }
+}
+
+const handleClear = () => {
+  searchKeyword.value = ''
+  isSearching.value = false
+  // 重新加载默认数据
+  loadDefaultData()
+}
+
+const loadDefaultData = async () => {
   try {
     const articleResponse = await axios.get('/articles/latest')
     articles.value = articleResponse
-    
     const toolResponse = await axios.get('/tools/popular')
     tools.value = toolResponse
   } catch (error) {
     console.error('获取数据失败:', error)
-    articles.value = [
-      {
-        id: 1,
-        title: 'Vue 3 入门教程：从零开始的完整指南',
-        content: 'Vue 3 是一套用于构建用户界面的渐进式 JavaScript 框架。与其他大型框架不同的是，Vue 被设计为可以自底向上逐层应用。Vue 的核心库只关注视图层，不仅易于上手，还便于与第三方库或既有项目整合。',
-        created_at: '2026-01-25',
-        view_count: 1234,
-        comment_count: 56
-      },
-      {
-        id: 2,
-        title: 'Spring Boot 4 新特性详解',
-        content: 'Spring Boot 4 带来了许多新特性，包括对 JDK 25 的支持、改进的性能和安全性等。本文将详细介绍这些新特性及其在实际开发中的应用。',
-        created_at: '2026-01-24',
-        view_count: 892,
-        comment_count: 34
-      },
-      {
-        id: 3,
-        title: 'TypeScript 最佳实践指南',
-        content: 'TypeScript 作为 JavaScript 的超集，提供了静态类型检查和面向对象特性。本文分享一些在实际项目中使用 TypeScript 的最佳实践。',
-        created_at: '2026-01-23',
-        view_count: 756,
-        comment_count: 28
-      }
-    ]
-    
-    tools.value = [
-      {
-        id: 1,
-        name: 'Markdown 编辑器',
-        description: '一个功能强大的在线 Markdown 编辑器，支持实时预览和多种主题切换。',
-        created_at: '2026-01-25'
-      },
-      {
-        id: 2,
-        name: '在线图片压缩工具',
-        description: '免费的在线图片压缩工具，支持多种格式。',
-        created_at: '2026-01-24'
-      },
-      {
-        id: 3,
-        name: 'JSON 格式化器',
-        description: '快速格式化、验证和压缩 JSON 数据。',
-        created_at: '2026-01-23'
-      }
-    ]
   }
+}
+
+onMounted(async () => {
+  await loadDefaultData()
 })
 </script>
 
@@ -657,6 +637,28 @@ onMounted(async () => {
 .sidebar__link:hover {
   background-color: transparent;
   color: var(--color-primary-500);
+}
+
+.search-result-hint {
+  margin-bottom: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--border-radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.search-result-hint p {
+  margin: 0;
+}
+
+.search-result-hint a {
+  color: var(--color-primary-600);
+  text-decoration: none;
+}
+
+.search-result-hint a:hover {
+  text-decoration: underline;
 }
 
 @media (max-width: 1024px) {

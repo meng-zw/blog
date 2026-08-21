@@ -2,9 +2,60 @@
   <div class="article-list">
     <div class="page-header">
       <div class="page-header__content">
-        <h1 class="page-title">全部文章</h1>
-        <p class="page-subtitle">精选技术文章，助力开发者成长</p>
+        <h1 class="page-title">{{ isSearching ? '搜索结果' : activeFilter ? `${activeFilter.name}` : '全部文章' }}</h1>
+        <p class="page-subtitle">{{ isSearching ? `搜索"${keyword}"的结果` : '精选技术文章，助力开发者成长' }}</p>
       </div>
+      <SearchBar
+        v-if="isSearching"
+        :keyword="keyword"
+        @search="handleSearch"
+        @clear="handleClear"
+      />
+    </div>
+
+    <!-- 筛选栏 -->
+    <div class="filter-bar">
+      <div class="filter-group">
+        <span class="filter-label">分类:</span>
+        <el-button
+          :type="!selectedCategoryId ? 'primary' : ''"
+          size="small"
+          @click="selectCategory(null)"
+        >
+          全部
+        </el-button>
+        <el-button
+          v-for="cat in categories"
+          :key="cat.id"
+          :type="selectedCategoryId === cat.id ? 'primary' : ''"
+          size="small"
+          @click="selectCategory(cat.id)"
+        >
+          {{ cat.name }}
+        </el-button>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label">标签:</span>
+        <el-button
+          :type="!selectedTagId ? 'primary' : ''"
+          size="small"
+          @click="selectTag(null)"
+        >
+          全部
+        </el-button>
+        <el-button
+          v-for="tag in tags"
+          :key="tag.id"
+          :type="selectedTagId === tag.id ? 'primary' : ''"
+          size="small"
+          @click="selectTag(tag.id)"
+        >
+          {{ tag.name }}
+        </el-button>
+      </div>
+      <el-button v-if="activeFilter" size="small" @click="clearFilter">
+        清除筛选
+      </el-button>
     </div>
 
     <div class="article-grid" v-if="articles.length > 0">
@@ -73,10 +124,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from '../utils/axios'
 import Icon from '../components/Icon.vue'
+import SearchBar from '../components/SearchBar.vue'
 
 const router = useRouter()
 const articles = ref<any[]>([])
@@ -84,6 +136,24 @@ const page = ref(1)
 const size = ref(9)
 const total = ref(0)
 const loading = ref(false)
+const keyword = ref('')
+const isSearching = ref(false)
+
+// 筛选相关
+const categories = ref<any[]>([])
+const tags = ref<any[]>([])
+const selectedCategoryId = ref<number | null>(null)
+const selectedTagId = ref<number | null>(null)
+
+const activeFilter = computed(() => {
+  if (selectedCategoryId.value) {
+    return categories.value.find(c => c.id === selectedCategoryId.value)
+  }
+  if (selectedTagId.value) {
+    return tags.value.find(t => t.id === selectedTagId.value)
+  }
+  return null
+})
 
 const goToArticle = (id: number) => {
   router.push(`/article/${id}`)
@@ -112,11 +182,26 @@ const excerpt = (content: string) => {
 const loadArticles = async () => {
   loading.value = true
   try {
-    const res = await axios.get('/articles', {
-      params: { page: page.value - 1, size: size.value }
-    })
-    articles.value = res.articles || []
-    total.value = res.total || 0
+    if (isSearching.value && keyword.value) {
+      // 搜索模式
+      const res = await axios.get('/search/articles', {
+        params: { keyword: keyword.value }
+      })
+      articles.value = res || []
+      total.value = articles.value.length
+    } else {
+      // 正常分页模式，支持分类和标签筛选
+      const params: any = { page: page.value - 1, size: size.value }
+      if (selectedCategoryId.value) {
+        params.category_id = selectedCategoryId.value
+      }
+      if (selectedTagId.value) {
+        params.tag_id = selectedTagId.value
+      }
+      const res = await axios.get('/articles', { params })
+      articles.value = res.articles || []
+      total.value = res.total || 0
+    }
   } catch (error) {
     console.error('获取文章列表失败:', error)
     articles.value = []
@@ -125,7 +210,56 @@ const loadArticles = async () => {
   }
 }
 
-onMounted(() => {
+const handleSearch = (searchKeyword: string) => {
+  keyword.value = searchKeyword
+  isSearching.value = true
+  page.value = 1
+  loadArticles()
+}
+
+const handleClear = () => {
+  keyword.value = ''
+  isSearching.value = false
+  page.value = 1
+  loadArticles()
+}
+
+const selectCategory = (categoryId: number | null) => {
+  selectedCategoryId.value = categoryId
+  selectedTagId.value = null
+  page.value = 1
+  loadArticles()
+}
+
+const selectTag = (tagId: number | null) => {
+  selectedTagId.value = tagId
+  selectedCategoryId.value = null
+  page.value = 1
+  loadArticles()
+}
+
+const clearFilter = () => {
+  selectedCategoryId.value = null
+  selectedTagId.value = null
+  page.value = 1
+  loadArticles()
+}
+
+const loadCategoriesAndTags = async () => {
+  try {
+    const [catRes, tagRes] = await Promise.all([
+      axios.get('/categories/article'),
+      axios.get('/tags')
+    ])
+    categories.value = catRes
+    tags.value = tagRes
+  } catch (error) {
+    console.error('加载分类和标签失败:', error)
+  }
+}
+
+onMounted(async () => {
+  await loadCategoriesAndTags()
   loadArticles()
 })
 </script>
@@ -355,6 +489,31 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   margin-top: var(--space-8);
+}
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-6);
+  padding: var(--space-4) var(--space-5);
+  background-color: var(--color-bg-primary);
+  border-radius: var(--border-radius-lg);
+  margin-bottom: var(--space-6);
+  border: 1px solid var(--color-border-light);
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.filter-label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
 }
 
 @media (max-width: 768px) {

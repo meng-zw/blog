@@ -97,7 +97,7 @@ const categories = ref<any[]>([])
 const loadCategories = async () => {
   try {
     // 真实API调用获取工具分类
-    categories.value = await axios.get('/tool-categories')
+    categories.value = await axios.get('/categories/tool')
   } catch (error) {
     console.error('加载工具分类失败:', error)
     // 如果API调用失败，使用模拟数据

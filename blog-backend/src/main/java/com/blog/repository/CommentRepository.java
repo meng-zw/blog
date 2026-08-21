@@ -19,4 +19,11 @@ public interface CommentRepository extends JpaRepository<Comment, Long> {
      * @return 评论列表
      */
     List<Comment> findByTargetIdAndTargetTypeOrderByCreatedAtDesc(Long targetId, String targetType);
+
+    /**
+     * 根据父评论ID查询回复列表，按创建时间倒序排列
+     * @param parentId 父评论ID
+     * @return 回复列表
+     */
+    List<Comment> findByParentIdOrderByCreatedAtDesc(Long parentId);
 }
