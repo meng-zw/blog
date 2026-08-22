@@ -1,0 +1,5 @@
+ALTER TABLE category
+    ADD COLUMN scope VARCHAR(20) NOT NULL DEFAULT 'ARTICLE' AFTER sort_order;
+
+ALTER TABLE topic
+    ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'DRAFT' AFTER cover_media_id;
