@@ -27,6 +27,14 @@
         >
           {{ userLikedTool ? '已点赞' : '点赞' }} ({{ tool.like_count || 0 }})
         </el-button>
+        <el-button
+          :type="userFavoritedTool ? 'warning' : 'default'"
+          size="small"
+          @click="toggleFavoriteTool"
+          :loading="favoriteLoading"
+        >
+          {{ userFavoritedTool ? '已收藏' : '收藏' }}
+        </el-button>
         <a :href="tool.url" target="_blank" rel="noopener noreferrer" class="url-link">{{ tool.url }}</a>
       </div>
     </el-card>
@@ -124,6 +132,8 @@ const commentForm = ref({
 })
 const userLikedTool = ref(false)
 const likeLoading = ref(false)
+const userFavoritedTool = ref(false)
+const favoriteLoading = ref(false)
 const submitting = ref(false)
 const loadingComments = ref(false)
 const replyingComment = ref<any>(null)
@@ -341,11 +351,61 @@ const loadLikeStatus = async () => {
   }
 }
 
+const checkFavoriteStatus = async () => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    userFavoritedTool.value = false
+    return
+  }
+  try {
+    const result = await axios.get(`/tools/${route.params.id}/favorited`)
+    userFavoritedTool.value = result?.liked || false
+  } catch (error) {
+    console.error('加载收藏状态失败:', error)
+    userFavoritedTool.value = false
+  }
+}
+
+const toggleFavoriteTool = async () => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    ElMessage.warning('请先登录后再收藏')
+    router.push('/login')
+    return
+  }
+
+  favoriteLoading.value = true
+  try {
+    if (userFavoritedTool.value) {
+      // 取消收藏
+      await axios.delete(`/tools/${route.params.id}/favorite`)
+      userFavoritedTool.value = false
+      ElMessage.success('已取消收藏')
+    } else {
+      // 收藏
+      await axios.post(`/tools/${route.params.id}/favorite`)
+      userFavoritedTool.value = true
+      ElMessage.success('收藏成功')
+    }
+  } catch (error: any) {
+    console.error('收藏操作失败:', error)
+    if (error.response?.status === 403 || error.response?.status === 401) {
+      ElMessage.warning('请先登录后再收藏')
+      router.push('/login')
+    } else {
+      ElMessage.error(error.message || '操作失败，请稍后重试')
+    }
+  } finally {
+    favoriteLoading.value = false
+  }
+}
+
 onMounted(async () => {
   await Promise.all([
     loadToolDetail(),
     loadComments(),
-    loadLikeStatus()
+    loadLikeStatus(),
+    checkFavoriteStatus()
   ])
 })
 </script>

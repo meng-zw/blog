@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS article (
     view_count BIGINT NOT NULL DEFAULT 0,
     comment_count BIGINT NOT NULL DEFAULT 0,
     like_count BIGINT NOT NULL DEFAULT 0,
+    status VARCHAR(20) NOT NULL DEFAULT 'published',
+    publish_time TIMESTAMP NULL,
+    cover_image VARCHAR(500),
+    is_top TINYINT(1) NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES user(id),
@@ -104,6 +108,17 @@ CREATE TABLE IF NOT EXISTS like_record (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES user(id),
     UNIQUE KEY unique_like (user_id, target_id, target_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 收藏记录表
+CREATE TABLE IF NOT EXISTS favorite (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    target_id BIGINT NOT NULL,
+    target_type VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES user(id),
+    UNIQUE KEY unique_favorite (user_id, target_id, target_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- 插入初始数据

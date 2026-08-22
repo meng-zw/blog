@@ -32,10 +32,15 @@
             v-for="(article, index) in articles"
             :key="article.id"
             class="article-card"
+            :class="{ 'has-cover': article.cover_image }"
             :style="{ animationDelay: `${index * 100}ms` }"
             shadow="hover"
           >
             <div class="article-card__body">
+              <!-- 封面图（无封面时显示渐变占位） -->
+              <div v-if="article.cover_image" class="article-card__cover" @click="goToArticle(article.id)">
+                <img :src="article.cover_image" :alt="article.title" loading="lazy" />
+              </div>
               <div class="article-card__meta">
                 <span class="article-card__tag" @click="goToArticleList">
                   <Icon name="tag" size="xs" />
@@ -43,10 +48,11 @@
                 </span>
                 <span class="article-card__date">
                   <Icon name="calendar" size="xs" />
-                  {{ formatDate(article.created_at) }}
+                  {{ formatDate(article.publish_time || article.created_at) }}
                 </span>
               </div>
               <h3 class="article-card__title" @click="goToArticle(article.id)">
+                <el-tag v-if="article.is_top" size="small" type="danger" class="article-card__top-tag">置顶</el-tag>
                 {{ article.title }}
               </h3>
               <p class="article-card__excerpt">{{ article.content?.substring(0, 120) }}...</p>
@@ -393,6 +399,36 @@ onMounted(async () => {
     var(--color-accent-100) 100%
   );
   border-bottom: 1px solid var(--color-border-light);
+}
+
+/* 有封面图时隐藏渐变占位 */
+.article-card.has-cover .article-card__body::before {
+  display: none;
+}
+
+.article-card__cover {
+  height: 150px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--color-border-light);
+  cursor: pointer;
+}
+
+.article-card__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--transition-normal);
+}
+
+.article-card:hover .article-card__cover img {
+  transform: scale(1.03);
+}
+
+.article-card__top-tag {
+  margin-right: var(--space-2);
+  vertical-align: middle;
 }
 
 .article-card__meta,

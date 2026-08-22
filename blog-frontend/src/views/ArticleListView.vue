@@ -63,9 +63,14 @@
         v-for="(article, index) in articles"
         :key="article.id"
         class="article-card"
+        :class="{ 'has-cover': article.cover_image }"
         :style="{ animationDelay: `${index * 80}ms` }"
         shadow="hover"
       >
+        <!-- 封面图（无封面时显示渐变占位） -->
+        <div v-if="article.cover_image" class="article-card__cover" @click="goToArticle(article.id)">
+          <img :src="article.cover_image" :alt="article.title" loading="lazy" />
+        </div>
         <div class="article-card__meta">
           <span class="article-card__tag" @click="goHome">
             <Icon name="tag" size="xs" />
@@ -73,10 +78,11 @@
           </span>
           <span class="article-card__date">
             <Icon name="calendar" size="xs" />
-            {{ formatDate(article.created_at) }}
+            {{ formatDate(article.publish_time || article.created_at) }}
           </span>
         </div>
         <h3 class="article-card__title" @click="goToArticle(article.id)">
+          <el-tag v-if="article.is_top" size="small" type="danger" class="article-card__top-tag">置顶</el-tag>
           {{ article.title }}
         </h3>
         <p class="article-card__excerpt">{{ excerpt(article.content) }}</p>
@@ -125,11 +131,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import axios from '../utils/axios'
 import Icon from '../components/Icon.vue'
 import SearchBar from '../components/SearchBar.vue'
 
+const route = useRoute()
 const router = useRouter()
 const articles = ref<any[]>([])
 const page = ref(1)
@@ -259,6 +266,17 @@ const loadCategoriesAndTags = async () => {
 }
 
 onMounted(async () => {
+  // 支持从标签云/分类入口携带 query 参数筛选
+  const tagId = Number(route.query.tag_id)
+  const categoryId = Number(route.query.category_id)
+  if (route.query.keyword) {
+    keyword.value = String(route.query.keyword)
+    isSearching.value = true
+  } else if (tagId > 0) {
+    selectedTagId.value = tagId
+  } else if (categoryId > 0) {
+    selectedCategoryId.value = categoryId
+  }
   await loadCategoriesAndTags()
   loadArticles()
 })
@@ -347,6 +365,36 @@ onMounted(async () => {
     var(--color-accent-100) 100%
   );
   border-bottom: 1px solid var(--color-border-light);
+}
+
+/* 有封面图时隐藏渐变占位 */
+.article-card.has-cover :deep(.el-card__body)::before {
+  display: none;
+}
+
+.article-card__cover {
+  height: 150px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--color-border-light);
+  cursor: pointer;
+}
+
+.article-card__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--transition-normal);
+}
+
+.article-card:hover .article-card__cover img {
+  transform: scale(1.03);
+}
+
+.article-card__top-tag {
+  margin-right: var(--space-2);
+  vertical-align: middle;
 }
 
 .article-card__meta,

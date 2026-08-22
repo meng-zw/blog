@@ -106,7 +106,7 @@ public class SecurityConfig {
                         // 允许匿名访问的接口
                         .requestMatchers("/auth/**", "/swagger-ui/**", "/v3/api-docs/**", "/api-docs/**", "/webjars/**").permitAll()
                         // 允许匿名访问静态资源
-                        .requestMatchers("/static/**", "/public/**").permitAll()
+                        .requestMatchers("/static/**", "/public/**", "/uploads/**").permitAll()
                         // 允许匿名访问Spring默认错误页面
                         .requestMatchers("/error").permitAll()
                         // 允许匿名访问公开内容的GET请求（文章、工具、分类、标签等）

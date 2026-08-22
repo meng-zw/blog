@@ -33,6 +33,16 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../views/ToolListView.vue')
   },
   {
+    path: '/archive',
+    name: 'archive',
+    component: () => import('../views/ArchiveView.vue')
+  },
+  {
+    path: '/tags',
+    name: 'tag-cloud',
+    component: () => import('../views/TagCloudView.vue')
+  },
+  {
     path: '/tool/:id',
     name: 'tool-detail',
     component: () => import('../views/ToolDetailView.vue')

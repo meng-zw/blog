@@ -10,10 +10,15 @@
             </span>
             <span class="article__date">
               <Icon name="calendar" size="xs" />
-              发布于 {{ formatDate(article.created_at) }}
+              发布于 {{ formatDate(article.publish_time || article.created_at) }}
             </span>
           </div>
-          <h1 class="article__title">{{ article.title }}</h1>
+          <h1 class="article__title">{{ article.title }}
+            <el-tag v-if="article.is_top" type="warning" size="small" class="article__top-tag">
+              <Icon name="pin" size="xs" />
+              置顶
+            </el-tag>
+          </h1>
           <div class="article__stats">
             <span class="article__stat">
               <Icon name="eye" size="sm" />
@@ -29,6 +34,8 @@
             </span>
           </div>
         </header>
+        
+        <img v-if="article.cover_image" :src="article.cover_image" class="article__cover" alt="封面图" />
         
         <div class="article__content" v-html="article.html_content"></div>
         
@@ -54,9 +61,14 @@
               {{ userLikedArticle ? '已点赞' : '点赞' }}
               <span v-if="article.like_count > 0">({{ article.like_count }})</span>
             </el-button>
-            <el-button type="primary" plain size="large">
+            <el-button 
+              :type="userFavoritedArticle ? 'warning' : 'primary'" 
+              plain 
+              size="large"
+              @click="toggleFavoriteArticle"
+            >
               <Icon name="bookmark" size="sm" />
-              收藏
+              {{ userFavoritedArticle ? '已收藏' : '收藏' }}
             </el-button>
             <el-button type="primary" plain size="large" @click="shareArticle">
               <Icon name="share" size="sm" />
@@ -64,11 +76,59 @@
             </el-button>
           </div>
         </footer>
+        
+        <!-- 上一篇/下一篇导航 -->
+        <nav v-if="neighbors.prev || neighbors.next" class="article__neighbors">
+          <router-link 
+            v-if="neighbors.prev" 
+            :to="`/article/${neighbors.prev.id}`" 
+            class="neighbor-link neighbor-link--prev"
+          >
+            <span class="neighbor-link__label">
+              <Icon name="chevron-left" size="xs" />
+              上一篇
+            </span>
+            <span class="neighbor-link__title">{{ neighbors.prev.title }}</span>
+          </router-link>
+          <router-link 
+            v-if="neighbors.next" 
+            :to="`/article/${neighbors.next.id}`" 
+            class="neighbor-link neighbor-link--next"
+          >
+            <span class="neighbor-link__label">
+              下一篇
+              <Icon name="chevron-right" size="xs" />
+            </span>
+            <span class="neighbor-link__title">{{ neighbors.next.title }}</span>
+          </router-link>
+        </nav>
       </article>
       
       <div v-else class="loading">
         <el-skeleton :rows="10" animated />
       </div>
+      
+      <!-- 相关文章 -->
+      <section v-if="relatedArticles.length > 0" class="related-section">
+        <h2 class="related-section__title">
+          <Icon name="link" size="lg" color="primary" />
+          相关文章
+        </h2>
+        <div class="related-list">
+          <router-link
+            v-for="item in relatedArticles"
+            :key="item.id"
+            :to="`/article/${item.id}`"
+            class="related-item"
+          >
+            <span class="related-item__title">{{ item.title }}</span>
+            <span class="related-item__meta">
+              {{ item.category }}
+              <span v-if="item.view_count">· {{ item.view_count }} 阅读</span>
+            </span>
+          </router-link>
+        </div>
+      </section>
       
       <section class="comment-section">
         <h2 class="comment-section__title">
@@ -192,6 +252,16 @@ const loadingComments = ref(false)
 const replyingComment = ref<any>(null)
 const replyContent = ref('')
 
+// 收藏相关
+const userFavoritedArticle = ref(false)
+const favoriteLoading = ref(false)
+
+// 上一篇/下一篇
+const neighbors = ref<{ prev: any; next: any }>({ prev: null, next: null })
+
+// 相关文章
+const relatedArticles = ref<any[]>([])
+
 const readingTime = computed(() => {
   if (!article.value?.content) return 1
   const words = article.value.content.length
@@ -274,6 +344,62 @@ const shareArticle = () => {
     document.execCommand('copy')
     document.body.removeChild(input)
     ElMessage.success('链接已复制到剪贴板')
+  }
+}
+
+// 收藏相关
+const checkFavoriteStatus = async () => {
+  const token = localStorage.getItem('token')
+  if (!token) return
+  try {
+    const favorited = await axios.get(`/articles/${route.params.id}/favorited`)
+    userFavoritedArticle.value = favorited.liked || false
+  } catch (error) {
+    userFavoritedArticle.value = false
+  }
+}
+
+const toggleFavoriteArticle = async () => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    ElMessage.warning('请先登录后再收藏')
+    router.push('/login')
+    return
+  }
+
+  favoriteLoading.value = true
+  try {
+    if (userFavoritedArticle.value) {
+      await axios.delete(`/articles/${route.params.id}/favorite`)
+      userFavoritedArticle.value = false
+      ElMessage.success('已取消收藏')
+    } else {
+      await axios.post(`/articles/${route.params.id}/favorite`)
+      userFavoritedArticle.value = true
+      ElMessage.success('收藏成功，可在个人中心查看')
+    }
+  } catch (error: any) {
+    console.error('收藏操作失败:', error)
+    ElMessage.error(error.message || '操作失败，请稍后重试')
+  } finally {
+    favoriteLoading.value = false
+  }
+}
+
+// 加载上一篇/下一篇与相关文章
+const loadNeighbors = async () => {
+  try {
+    neighbors.value = await axios.get(`/articles/${route.params.id}/neighbors`)
+  } catch (error) {
+    neighbors.value = { prev: null, next: null }
+  }
+}
+
+const loadRelatedArticles = async () => {
+  try {
+    relatedArticles.value = await axios.get(`/articles/${route.params.id}/related`)
+  } catch (error) {
+    relatedArticles.value = []
   }
 }
 
@@ -517,7 +643,12 @@ onMounted(async () => {
     loadArticle(),
     loadComments()
   ])
-  await checkLikeStatus()
+  await Promise.all([
+    checkLikeStatus(),
+    checkFavoriteStatus(),
+    loadNeighbors(),
+    loadRelatedArticles()
+  ])
 })
 </script>
 
@@ -593,6 +724,24 @@ onMounted(async () => {
   margin: 0 0 var(--space-3);
   line-height: var(--line-height-tight);
   letter-spacing: var(--letter-spacing-wide);
+}
+
+.article__top-tag {
+  margin-left: var(--space-2);
+  vertical-align: middle;
+}
+
+.article__top-tag :deep(svg) {
+  margin-right: 2px;
+}
+
+.article__cover {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: cover;
+  border-radius: var(--border-radius-md);
+  margin-bottom: var(--space-5);
 }
 
 .article__stats {
@@ -675,6 +824,112 @@ onMounted(async () => {
 .article__actions {
   display: flex;
   gap: var(--space-3);
+}
+
+/* 上一篇/下一篇导航 */
+.article__neighbors {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-border-light);
+}
+
+.neighbor-link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--border-radius-md);
+  text-decoration: none;
+  transition: background-color var(--transition-fast);
+}
+
+.neighbor-link:hover {
+  background-color: var(--color-gray-200);
+}
+
+.neighbor-link--next {
+  text-align: right;
+}
+
+.neighbor-link__label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+}
+
+.neighbor-link--next .neighbor-link__label {
+  justify-content: flex-end;
+}
+
+.neighbor-link__title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 相关文章 */
+.related-section {
+  background-color: var(--color-bg-primary);
+  border-radius: var(--border-radius-lg);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border-light);
+  margin-bottom: var(--space-5);
+}
+
+.related-section__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0 0 var(--space-4);
+}
+
+.related-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.related-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background-color: var(--color-bg-tertiary);
+  border-radius: var(--border-radius-md);
+  text-decoration: none;
+  transition: background-color var(--transition-fast);
+}
+
+.related-item:hover {
+  background-color: var(--color-gray-200);
+}
+
+.related-item__title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.related-item__meta {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
 }
 
 .loading {
@@ -877,6 +1132,18 @@ onMounted(async () => {
   
   .article__actions {
     flex-wrap: wrap;
+  }
+  
+  .article__neighbors {
+    grid-template-columns: 1fr;
+  }
+  
+  .neighbor-link--next {
+    text-align: left;
+  }
+  
+  .neighbor-link--next .neighbor-link__label {
+    justify-content: flex-start;
   }
   
   .comment-section {

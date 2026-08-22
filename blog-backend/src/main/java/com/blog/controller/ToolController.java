@@ -1,11 +1,13 @@
 package com.blog.controller;
 
 import com.blog.entity.Category;
+import com.blog.entity.Favorite;
 import com.blog.entity.LikeRecord;
 import com.blog.entity.Tag;
 import com.blog.entity.Tool;
 import com.blog.entity.User;
 import com.blog.repository.CategoryRepository;
+import com.blog.repository.FavoriteRepository;
 import com.blog.repository.LikeRepository;
 import com.blog.repository.TagRepository;
 import com.blog.repository.ToolRepository;
@@ -44,6 +46,9 @@ public class ToolController {
 
     @Autowired
     private LikeRepository likeRepository;
+
+    @Autowired
+    private FavoriteRepository favoriteRepository;
 
     /**
      * 创建工具
@@ -321,6 +326,118 @@ public class ToolController {
         java.util.Optional<LikeRecord> existingLike = likeRepository.findByUserIdAndTargetIdAndTargetType(
                 user.getId(), id, "tool");
         return ResponseEntity.ok(new LikedResponse(existingLike.isPresent()));
+    }
+
+    /**
+     * 收藏工具
+     * @param id 工具ID
+     * @return 收藏结果
+     */
+    @PostMapping("/{id}/favorite")
+    public ResponseEntity<?> favoriteTool(@PathVariable("id") Long id) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = authentication.getName();
+        User user = userRepository.findByUsername(username);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorBody("用户未登录"));
+        }
+
+        if (toolRepository.findById(id).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        java.util.Optional<Favorite> existing = favoriteRepository.findByUserIdAndTargetIdAndTargetType(
+                user.getId(), id, "tool");
+        if (existing.isPresent()) {
+            return ResponseEntity.badRequest().body(errorBody("您已经收藏过了"));
+        }
+
+        Favorite favorite = new Favorite();
+        favorite.setUser(user);
+        favorite.setTargetId(id);
+        favorite.setTargetType("tool");
+        favorite.setCreatedAt(new Date());
+        favoriteRepository.save(favorite);
+
+        return ResponseEntity.ok(errorBody("收藏成功"));
+    }
+
+    /**
+     * 取消收藏工具
+     * @param id 工具ID
+     * @return 结果
+     */
+    @DeleteMapping("/{id}/favorite")
+    public ResponseEntity<?> unfavoriteTool(@PathVariable("id") Long id) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = authentication.getName();
+        User user = userRepository.findByUsername(username);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorBody("用户未登录"));
+        }
+
+        java.util.Optional<Favorite> existing = favoriteRepository.findByUserIdAndTargetIdAndTargetType(
+                user.getId(), id, "tool");
+        if (existing.isEmpty()) {
+            return ResponseEntity.badRequest().body(errorBody("您还没有收藏"));
+        }
+
+        favoriteRepository.delete(existing.get());
+        return ResponseEntity.ok(errorBody("已取消收藏"));
+    }
+
+    /**
+     * 检查当前用户是否已收藏工具
+     * @param id 工具ID
+     * @return 收藏状态
+     */
+    @GetMapping("/{id}/favorited")
+    public ResponseEntity<?> checkToolFavorite(@PathVariable("id") Long id) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = authentication.getName();
+        User user = userRepository.findByUsername(username);
+
+        if (user == null) {
+            return ResponseEntity.ok(new LikedResponse(false));
+        }
+
+        java.util.Optional<Favorite> existing = favoriteRepository.findByUserIdAndTargetIdAndTargetType(
+                user.getId(), id, "tool");
+        return ResponseEntity.ok(new LikedResponse(existing.isPresent()));
+    }
+
+    /**
+     * 获取当前用户收藏的工具列表
+     * @return 收藏的工具列表
+     */
+    @GetMapping("/favorites")
+    public ResponseEntity<?> getFavoriteTools() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = authentication.getName();
+        User user = userRepository.findByUsername(username);
+        if (user == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorBody("用户未登录"));
+        }
+
+        java.util.List<Favorite> favorites = favoriteRepository.findByUserIdAndTargetTypeOrderByCreatedAtDesc(user.getId(), "tool");
+        java.util.List<java.util.Map<String, Object>> result = new java.util.ArrayList<>();
+        for (Favorite favorite : favorites) {
+            Tool tool = toolRepository.findById(favorite.getTargetId()).orElse(null);
+            if (tool == null) {
+                continue;
+            }
+            java.util.Map<String, Object> item = new java.util.HashMap<>();
+            item.put("id", tool.getId());
+            item.put("name", tool.getName());
+            item.put("description", tool.getDescription());
+            item.put("url", tool.getUrl());
+            item.put("created_at", tool.getCreatedAt());
+            item.put("view_count", tool.getViewCount());
+            item.put("comment_count", tool.getCommentCount());
+            item.put("category", tool.getCategory() != null ? tool.getCategory().getName() : "");
+            result.add(item);
+        }
+        return ResponseEntity.ok(result);
     }
 
     /**

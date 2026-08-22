@@ -90,6 +90,30 @@ public class Article {
     private Long likeCount;
 
     /**
+     * 文章状态：draft(草稿)/published(已发布)/scheduled(定时发布)
+     */
+    @Column(name = "status", nullable = false, length = 20, columnDefinition = "VARCHAR(20) DEFAULT 'published'")
+    private String status = "published";
+
+    /**
+     * 发布时间（定时发布时记录实际发布时间；为空时按创建时间排序/归档）
+     */
+    @Column(name = "publish_time")
+    private Date publishTime;
+
+    /**
+     * 封面图URL
+     */
+    @Column(name = "cover_image", length = 500)
+    private String coverImage;
+
+    /**
+     * 是否置顶
+     */
+    @Column(name = "is_top", nullable = false, columnDefinition = "TINYINT(1) DEFAULT 0")
+    private Boolean isTop = false;
+
+    /**
      * 创建时间
      */
     @CreatedDate

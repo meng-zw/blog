@@ -68,10 +68,18 @@
             <div class="article-info">
               <h4 class="article-title" @click="goToArticle(article.id)">
                 {{ article.title }}
+                <el-tag
+                  v-if="article.status && article.status !== 'published'"
+                  size="small"
+                  :type="statusTagType(article.status)"
+                  class="status-tag"
+                >
+                  {{ statusText(article.status) }}
+                </el-tag>
               </h4>
               <div class="article-meta">
                 <span class="article-category">{{ article.category?.name || '技术' }}</span>
-                <span class="article-date">{{ formatDate(article.created_at) }}</span>
+                <span class="article-date">{{ formatDate(article.publish_time || article.created_at) }}</span>
               </div>
             </div>
             <div class="article-stats">
@@ -149,6 +157,78 @@
           </el-button>
         </div>
       </el-card>
+
+      <!-- 我的收藏 -->
+      <el-card class="my-favorites">
+        <template #header>
+          <div class="card-header">
+            <h2>我的收藏</h2>
+          </div>
+        </template>
+        <el-tabs v-model="favoriteTab">
+          <el-tab-pane label="收藏的文章" name="articles">
+            <div class="article-list" v-if="favoriteArticles.length > 0">
+              <div
+                v-for="article in favoriteArticles"
+                :key="article.id"
+                class="article-item"
+              >
+                <div class="article-info">
+                  <h4 class="article-title" @click="goToArticle(article.id)">
+                    {{ article.title }}
+                  </h4>
+                  <div class="article-meta">
+                    <span class="article-category">{{ article.category || '技术' }}</span>
+                    <span class="article-date">{{ formatDate(article.time) }}</span>
+                  </div>
+                </div>
+                <div class="article-stats">
+                  <span><Icon name="eye" size="xs" /> {{ article.view_count || 0 }}</span>
+                </div>
+                <div class="article-actions">
+                  <el-button type="danger" text size="small" @click="unfavoriteArticle(article.id)">
+                    取消收藏
+                  </el-button>
+                </div>
+              </div>
+            </div>
+            <div v-else class="empty-state">
+              <Icon name="article" size="xl" />
+              <p>还没有收藏过文章</p>
+            </div>
+          </el-tab-pane>
+          <el-tab-pane label="收藏的工具" name="tools">
+            <div class="tool-list" v-if="favoriteTools.length > 0">
+              <div
+                v-for="tool in favoriteTools"
+                :key="tool.id"
+                class="tool-item"
+              >
+                <div class="tool-info">
+                  <h4 class="tool-name" @click="goToTool(tool.id)">{{ tool.name }}</h4>
+                  <p class="tool-desc">{{ tool.description?.substring(0, 60) }}...</p>
+                  <div class="tool-meta">
+                    <span class="tool-category">{{ tool.category || '其他' }}</span>
+                    <span class="tool-date">{{ formatDate(tool.created_at) }}</span>
+                  </div>
+                </div>
+                <div class="tool-stats">
+                  <span><Icon name="eye" size="xs" /> {{ tool.view_count || 0 }}</span>
+                </div>
+                <div class="tool-actions">
+                  <el-button type="danger" text size="small" @click="unfavoriteTool(tool.id)">
+                    取消收藏
+                  </el-button>
+                </div>
+              </div>
+            </div>
+            <div v-else class="empty-state">
+              <Icon name="tool" size="xl" />
+              <p>还没有收藏过工具</p>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </el-card>
     </div>
   </div>
 </template>
@@ -164,6 +244,9 @@ const router = useRouter()
 const user = ref<any>({})
 const articles = ref<any[]>([])
 const tools = ref<any[]>([])
+const favoriteTab = ref('articles')
+const favoriteArticles = ref<any[]>([])
+const favoriteTools = ref<any[]>([])
 
 // 统计信息
 const stats = computed(() => {
@@ -195,9 +278,9 @@ const loadUserInfo = async () => {
 
 const loadMyArticles = async () => {
   try {
-    const response = await axios.get('/articles', { params: { page: 0, size: 100 } })
-    // 过滤出当前用户的文章
-    articles.value = (response.articles || []).filter((a: any) => a.user?.username === user.value.username)
+    // status=all 表示查询当前用户自己的全部文章（含草稿/定时发布）
+    const response = await axios.get('/articles', { params: { status: 'all', page: 0, size: 100 } })
+    articles.value = response.articles || []
   } catch (error) {
     console.error('获取我的文章失败:', error)
     articles.value = []
@@ -279,12 +362,69 @@ const goToShareTool = () => {
   router.push('/share-tool')
 }
 
+// 文章状态展示
+const statusText = (status: string) => {
+  const map: Record<string, string> = {
+    draft: '草稿',
+    scheduled: '定时发布'
+  }
+  return map[status] || status
+}
+
+const statusTagType = (status: string) => {
+  const map: Record<string, string> = {
+    draft: 'info',
+    scheduled: 'warning'
+  }
+  return (map[status] || 'info') as any
+}
+
+const loadFavoriteArticles = async () => {
+  try {
+    favoriteArticles.value = await axios.get('/articles/favorites')
+  } catch (error) {
+    console.error('获取收藏文章失败:', error)
+    favoriteArticles.value = []
+  }
+}
+
+const loadFavoriteTools = async () => {
+  try {
+    favoriteTools.value = await axios.get('/tools/favorites')
+  } catch (error) {
+    console.error('获取收藏工具失败:', error)
+    favoriteTools.value = []
+  }
+}
+
+const unfavoriteArticle = async (id: number) => {
+  try {
+    await axios.delete(`/articles/${id}/favorite`)
+    favoriteArticles.value = favoriteArticles.value.filter(a => a.id !== id)
+    ElMessage.success('已取消收藏')
+  } catch (error: any) {
+    ElMessage.error(error.message || '取消收藏失败')
+  }
+}
+
+const unfavoriteTool = async (id: number) => {
+  try {
+    await axios.delete(`/tools/${id}/favorite`)
+    favoriteTools.value = favoriteTools.value.filter(t => t.id !== id)
+    ElMessage.success('已取消收藏')
+  } catch (error: any) {
+    ElMessage.error(error.message || '取消收藏失败')
+  }
+}
+
 onMounted(async () => {
   if (!checkLogin()) return
   await Promise.all([
     loadUserInfo(),
     loadMyArticles(),
-    loadMyTools()
+    loadMyTools(),
+    loadFavoriteArticles(),
+    loadFavoriteTools()
   ])
 })
 </script>
@@ -410,6 +550,15 @@ onMounted(async () => {
 
 .my-articles, .my-tools {
   border-radius: var(--border-radius-lg);
+}
+
+.my-favorites {
+  border-radius: var(--border-radius-lg);
+}
+
+.status-tag {
+  margin-left: var(--space-2);
+  vertical-align: middle;
 }
 
 .article-list, .tool-list {

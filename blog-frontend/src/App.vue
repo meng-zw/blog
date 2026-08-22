@@ -89,6 +89,8 @@
                 <ul>
                   <li><router-link to="/">首页</router-link></li>
                   <li><router-link to="/article">文章</router-link></li>
+                  <li><router-link to="/archive">归档</router-link></li>
+                  <li><router-link to="/tags">标签云</router-link></li>
                   <li><router-link to="/tool">工具</router-link></li>
                 </ul>
               </div>
@@ -150,6 +152,8 @@ const currentYear = new Date().getFullYear()
 const navItems: NavItem[] = [
   { index: 'home', label: '首页', to: '/', icon: 'home' },
   { index: 'article', label: '文章', to: '/article', icon: 'article' },
+  { index: 'archive', label: '归档', to: '/archive', icon: 'archive' },
+  { index: 'tags', label: '标签云', to: '/tags', icon: 'tag' },
   { index: 'tool', label: '工具', to: '/tool', icon: 'tool' },
   { index: 'write', label: '写文章', to: '/write', icon: 'write' },
   { index: 'share-tool', label: '分享工具', to: '/share-tool', icon: 'share' }

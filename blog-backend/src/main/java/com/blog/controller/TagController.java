@@ -11,8 +11,11 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 标签控制器，处理标签的CRUD操作（管理员专用）
@@ -32,6 +35,24 @@ public class TagController {
     public ResponseEntity<?> getAllTags() {
         List<Tag> tags = tagRepository.findAllByOrderByCreatedAtDesc();
         return ResponseEntity.ok(tags);
+    }
+
+    /**
+     * 获取标签使用统计（标签云用，仅统计已发布文章）
+     * @return 标签列表，每项含 id/name/article_count
+     */
+    @GetMapping("/stats")
+    public ResponseEntity<?> getTagStats() {
+        List<Object[]> rows = tagRepository.countArticlesByTag();
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (Object[] row : rows) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("id", row[0]);
+            item.put("name", row[1]);
+            item.put("article_count", row[2]);
+            result.add(item);
+        }
+        return ResponseEntity.ok(result);
     }
 
     /**
