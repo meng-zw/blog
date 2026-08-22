@@ -1,25 +1,31 @@
 package com.blog.utils;
 
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.Base64;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import javax.crypto.SecretKey;
-import java.util.Date;
 
 /**
  * JWT工具类，用于生成和验证JWT令牌
  */
 @Component
 public class JwtUtils {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final Base64.Encoder URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
+    private static final Base64.Decoder URL_DECODER = Base64.getUrlDecoder();
 
-    @Value("${jwt.secret}")
+    @Value("${jwt.secret:replace-this-legacy-secret-before-production}")
     private String jwtSecret;
 
-    @Value("${jwt.expiration}")
-    private int jwtExpirationMs;
+    @Value("${jwt.expiration:86400000}")
+    private long jwtExpirationMs;
 
     /**
      * 生成JWT令牌
@@ -27,15 +33,12 @@ public class JwtUtils {
      * @return JWT令牌
      */
     public String generateToken(String username) {
-        Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + jwtExpirationMs);
-
-        return Jwts.builder()
-                .subject(username)
-                .issuedAt(now)
-                .expiration(expiryDate)
-                .signWith(getSigningKey())
-                .compact();
+        long now = Instant.now().toEpochMilli();
+        String header = encode("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
+        String payload = encode("{\"sub\":\"" + escape(username) + "\",\"iat\":" + now
+                + ",\"exp\":" + (now + jwtExpirationMs) + "}");
+        String signingInput = header + "." + payload;
+        return signingInput + "." + sign(signingInput);
     }
 
     /**
@@ -44,16 +47,12 @@ public class JwtUtils {
      * @return 用户名
      */
     public String getUsernameFromToken(String token) {
+        if (!validateToken(token)) {
+            return null;
+        }
         try {
-            Claims claims = Jwts.parser()
-                    .verifyWith(getSigningKey())
-                    .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
-
-            return claims.getSubject();
-        } catch (Exception e) {
-            System.out.println("Invalid JWT token: " + e.getMessage());
+            return OBJECT_MAPPER.readTree(decode(token.split("\\.")[1])).path("sub").asText(null);
+        } catch (Exception ignored) {
             return null;
         }
     }
@@ -65,22 +64,36 @@ public class JwtUtils {
      */
     public boolean validateToken(String token) {
         try {
-            Jwts.parser()
-                    .verifyWith(getSigningKey())
-                    .build()
-                    .parseSignedClaims(token);
-            return true;
-        } catch (Exception e) {
-            System.out.println("Invalid JWT token: " + e.getMessage());
+            String[] parts = token.split("\\.");
+            if (parts.length != 3 || !MessageDigest.isEqual(URL_DECODER.decode(parts[2]), URL_DECODER.decode(sign(parts[0] + "." + parts[1])))) {
+                return false;
+            }
+            JsonNode payload = OBJECT_MAPPER.readTree(decode(parts[1]));
+            return payload.path("sub").isTextual() && payload.path("exp").asLong(0) > Instant.now().toEpochMilli();
+        } catch (Exception ignored) {
+            return false;
         }
-        return false;
     }
 
-    /**
-     * 获取签名密钥
-     * @return 签名密钥
-     */
-    private SecretKey getSigningKey() {
-        return Keys.hmacShaKeyFor(jwtSecret.getBytes());
+    private String sign(String signingInput) {
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(jwtSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return URL_ENCODER.encodeToString(mac.doFinal(signingInput.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception exception) {
+            throw new IllegalStateException("Unable to sign legacy token", exception);
+        }
+    }
+
+    private static String encode(String value) {
+        return URL_ENCODER.encodeToString(value.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String decode(String value) {
+        return new String(URL_DECODER.decode(value), StandardCharsets.UTF_8);
+    }
+
+    private static String escape(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }

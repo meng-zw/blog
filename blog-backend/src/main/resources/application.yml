@@ -1,70 +1,34 @@
 spring:
   application:
     name: blog-backend
-
-  # Jackson 序列化配置：字段名转下划线（与前端 snake_case 约定一致）
+  profiles:
+    default: dev
   jackson:
     property-naming-strategy: SNAKE_CASE
     date-format: yyyy-MM-dd HH:mm:ss
-    time-zone: GMT+8
-  
-  # 数据库配置
-  datasource:
-    url: jdbc:mysql://localhost:3306/blog?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
-    username: root
-    password: root
-    driver-class-name: com.mysql.cj.jdbc.Driver
-
-  # 文件上传大小限制
+    time-zone: Asia/Shanghai
   servlet:
     multipart:
       max-file-size: 10MB
       max-request-size: 20MB
-  
-  # JPA配置
   jpa:
     hibernate:
-      ddl-auto: update
-    show-sql: true
-    properties:
-      hibernate:
-        format_sql: true
-  
+      ddl-auto: validate
+    open-in-view: false
+  flyway:
+    enabled: true
 
-# 服务器配置
 server:
   port: 8081
   servlet:
     context-path: /api
 
-# MyBatis Plus配置
-mybatis-plus:
-  mapper-locations: classpath*:mapper/**/*.xml
-  type-aliases-package: com.blog.entity
-  configuration:
-    map-underscore-to-camel-case: true
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
-
-# 文件上传配置（相对后端工作目录）
 upload:
   dir: ./uploads
 
-# JWT配置
-jwt:
-  secret: your-secret-key-must-be-at-least-256-bits-long-for-HS512-algorithm-to-work-properly
-  expiration: 86400000 # 1天，单位毫秒
-  header: Authorization
-
-# SpringDoc OpenAPI配置
 springdoc:
   api-docs:
     path: /api-docs
   swagger-ui:
     path: /swagger-ui.html
     enabled: true
-
-# 日志配置
-logging:
-  level:
-    com.blog: debug
-    org.springframework.security: debug

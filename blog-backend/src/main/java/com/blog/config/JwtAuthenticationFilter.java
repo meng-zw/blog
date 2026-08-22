@@ -33,7 +33,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Autowired
     private UserDetailsService userDetailsService;
 
-    @Value("${jwt.header}")
+    @Value("${jwt.header:Authorization}")
     private String jwtHeader;
 
     @Override
