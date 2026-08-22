@@ -30,6 +30,8 @@ server:
         same-site: lax
 
 blog:
+  media:
+    directory: ${BLOG_MEDIA_DIR:./media}
   admin:
     bootstrap:
       username: ${BLOG_ADMIN_USERNAME:}
