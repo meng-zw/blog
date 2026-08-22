@@ -17,3 +17,5 @@ server:
     session:
       cookie:
         secure: true
+blog:
+  public-base-url: ${BLOG_PUBLIC_BASE_URL}

@@ -30,6 +30,28 @@ public interface ToolRepository extends JpaRepository<Tool, Long> {
             + "and tool.status = com.blog.tool.ToolStatus.PUBLISHED and tool.publishedAt <= :now")
     Optional<Tool> findPublishedBySlug(@Param("slug") String slug, @Param("now") Instant now);
 
+    @Query("select tool.id from PublishingTool tool "
+            + "where tool.status = com.blog.tool.ToolStatus.PUBLISHED and tool.publishedAt <= :now "
+            + "and tool.featured = true "
+            + "order by tool.sortOrder asc, tool.publishedAt desc, tool.id desc")
+    List<Long> findVisibleFeaturedIds(@Param("now") Instant now, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"coverMedia", "category", "tags"})
+    @Query("select distinct tool from PublishingTool tool where tool.id in :ids "
+            + "and tool.status = com.blog.tool.ToolStatus.PUBLISHED and tool.publishedAt <= :now "
+            + "and tool.featured = true")
+    List<Tool> findVisibleFeaturedSummariesByIdIn(@Param("ids") List<Long> ids, @Param("now") Instant now);
+
+    @Query("select tool.id as id, tool.slug as slug from PublishingTool tool "
+            + "where tool.id > :afterId and tool.status = com.blog.tool.ToolStatus.PUBLISHED "
+            + "and tool.publishedAt <= :now order by tool.id asc")
+    List<SitemapRow> findVisibleSitemapBatch(@Param("afterId") long afterId, @Param("now") Instant now, Pageable pageable);
+
+    interface SitemapRow {
+        Long getId();
+        String getSlug();
+    }
+
     @Query("select tool from PublishingTool tool where (:status is null or tool.status = :status)")
     Page<Tool> findAdminPage(@Param("status") ToolStatus status, Pageable pageable);
 

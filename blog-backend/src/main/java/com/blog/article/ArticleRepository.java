@@ -47,6 +47,33 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
             + "and article.status = com.blog.article.ArticleStatus.PUBLISHED and article.publishedAt <= :now")
     Optional<Article> findPublishedBySlug(@Param("slug") String slug, @Param("now") Instant now);
 
+    @Query("select article.id from PublishingArticle article "
+            + "where article.status = com.blog.article.ArticleStatus.PUBLISHED and article.publishedAt <= :now "
+            + "and article.contentType = com.blog.article.ContentType.ARTICLE "
+            + "order by article.publishedAt desc, article.id desc")
+    List<Long> findNewestVisibleArticleIds(@Param("now") Instant now, Pageable pageable);
+
+    @Query("select article.id from PublishingArticle article "
+            + "where article.status = com.blog.article.ArticleStatus.PUBLISHED and article.publishedAt <= :now "
+            + "order by article.publishedAt desc, article.id desc")
+    List<Long> findLatestVisibleIds(@Param("now") Instant now, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"coverMedia", "category", "tags"})
+    @Query("select distinct article from PublishingArticle article where article.id in :ids "
+            + "and article.status = com.blog.article.ArticleStatus.PUBLISHED and article.publishedAt <= :now")
+    List<Article> findVisibleSummariesByIdIn(@Param("ids") List<Long> ids, @Param("now") Instant now);
+
+    @Query("select article.id as id, article.slug as slug from PublishingArticle article "
+            + "where article.id > :afterId and article.status = com.blog.article.ArticleStatus.PUBLISHED "
+            + "and article.publishedAt <= :now order by article.id asc")
+    List<SitemapRow> findVisibleSitemapBatch(@Param("afterId") long afterId, @Param("now") Instant now,
+                                             Pageable pageable);
+
+    interface SitemapRow {
+        Long getId();
+        String getSlug();
+    }
+
     @Query("select article from PublishingArticle article where article.status = com.blog.article.ArticleStatus.PUBLISHED "
             + "and article.publishedAt <= :now and article.contentType = :contentType "
             + "and (article.publishedAt < :publishedAt or (article.publishedAt = :publishedAt and article.id < :id)) "

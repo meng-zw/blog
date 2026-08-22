@@ -6,3 +6,5 @@ spring:
     enabled: true
   main:
     banner-mode: "off"
+blog:
+  public-base-url: https://example.com
