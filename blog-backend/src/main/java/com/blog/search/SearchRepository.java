@@ -25,6 +25,7 @@ public class SearchRepository {
               (SELECT COUNT(*) FROM tool tl
                  WHERE tl.status = 'PUBLISHED' AND tl.published_at <= :now
                    AND (LOWER(tl.name) LIKE :pattern ESCAPE '!'
+                     OR LOWER(COALESCE(tl.summary, '')) LIKE :pattern ESCAPE '!'
                      OR LOWER(COALESCE(tl.description_markdown, '')) LIKE :pattern ESCAPE '!'))
             )
             """;
@@ -55,6 +56,7 @@ public class SearchRepository {
                 FROM tool tl
                WHERE tl.status = 'PUBLISHED' AND tl.published_at <= :now
                  AND (LOWER(tl.name) LIKE :pattern ESCAPE '!'
+                   OR LOWER(COALESCE(tl.summary, '')) LIKE :pattern ESCAPE '!'
                    OR LOWER(COALESCE(tl.description_markdown, '')) LIKE :pattern ESCAPE '!')
             ) combined
             ORDER BY relevance ASC, sort_time DESC, result_type ASC, entity_id DESC

@@ -46,11 +46,11 @@ class HomeQueryIntegrationTest {
         when(siteProfileService.getProfile()).thenReturn(new SiteProfileResponse(
                 "小M的思与行", "中庸之道", "小M", "Bio", "/avatar.png", "https://github.com/meng-zw"));
         when(articleRepository.findNewestVisibleArticleIds(eq(NOW), any(Pageable.class))).thenReturn(List.of(10L));
-        when(articleRepository.findLatestVisibleIds(eq(NOW), any(Pageable.class)))
+        when(articleRepository.findLatestVisibleArticleIds(eq(NOW), any(Pageable.class)))
                 .thenReturn(List.of(10L, 9L, 8L, 7L, 6L));
         when(articleRepository.findVisibleSummariesByIdIn(eq(List.of(10L, 9L, 8L, 7L, 6L)), eq(NOW)))
-                .thenReturn(List.of(article(7, ContentType.NOTE), article(10, ContentType.ARTICLE),
-                        article(6, ContentType.ARTICLE), article(9, ContentType.NOTE), article(8, ContentType.ARTICLE)));
+                .thenReturn(List.of(article(7, ContentType.ARTICLE), article(10, ContentType.ARTICLE),
+                        article(6, ContentType.ARTICLE), article(9, ContentType.ARTICLE), article(8, ContentType.ARTICLE)));
         when(toolRepository.findVisibleFeaturedIds(eq(NOW), any(Pageable.class))).thenReturn(List.of(2L, 1L));
         when(toolRepository.findVisibleFeaturedSummariesByIdIn(List.of(2L, 1L), NOW))
                 .thenReturn(List.of(tool(1), tool(2)));
@@ -62,12 +62,14 @@ class HomeQueryIntegrationTest {
         assertThat(result.site().siteTitle()).isEqualTo("小M的思与行");
         assertThat(result.featuredArticle().id()).isEqualTo(10L);
         assertThat(result.latestArticles()).extracting(item -> item.id()).containsExactly(9L, 8L, 7L, 6L);
+        assertThat(result.latestArticles()).extracting(item -> item.contentType())
+                .containsOnly(ContentType.ARTICLE);
         assertThat(result.featuredTools()).extracting(item -> item.id()).containsExactly(2L, 1L);
         assertThat(result.topics()).extracting(item -> item.id()).containsExactly(3L, 4L);
 
         ArgumentCaptor<Pageable> articleLimits = ArgumentCaptor.forClass(Pageable.class);
         verify(articleRepository).findNewestVisibleArticleIds(eq(NOW), articleLimits.capture());
-        verify(articleRepository).findLatestVisibleIds(eq(NOW), articleLimits.capture());
+        verify(articleRepository).findLatestVisibleArticleIds(eq(NOW), articleLimits.capture());
         assertThat(articleLimits.getAllValues()).extracting(Pageable::getPageSize).containsExactly(1, 5);
         ArgumentCaptor<Pageable> toolLimit = ArgumentCaptor.forClass(Pageable.class);
         verify(toolRepository).findVisibleFeaturedIds(eq(NOW), toolLimit.capture());
@@ -82,7 +84,7 @@ class HomeQueryIntegrationTest {
         SiteProfileResponse site = new SiteProfileResponse("Site", "Subtitle", "Owner", "Bio", null, null);
         when(siteProfileService.getProfile()).thenReturn(site);
         when(articleRepository.findNewestVisibleArticleIds(eq(NOW), any(Pageable.class))).thenReturn(List.of());
-        when(articleRepository.findLatestVisibleIds(eq(NOW), any(Pageable.class))).thenReturn(List.of());
+        when(articleRepository.findLatestVisibleArticleIds(eq(NOW), any(Pageable.class))).thenReturn(List.of());
         when(toolRepository.findVisibleFeaturedIds(eq(NOW), any(Pageable.class))).thenReturn(List.of());
         when(topicRepository.findPublishedForHome(eq(TopicStatus.PUBLISHED), any(Pageable.class))).thenReturn(List.of());
 
@@ -100,13 +102,14 @@ class HomeQueryIntegrationTest {
         Query featured = ArticleRepository.class
                 .getMethod("findNewestVisibleArticleIds", Instant.class, Pageable.class).getAnnotation(Query.class);
         Query latest = ArticleRepository.class
-                .getMethod("findLatestVisibleIds", Instant.class, Pageable.class).getAnnotation(Query.class);
+                .getMethod("findLatestVisibleArticleIds", Instant.class, Pageable.class).getAnnotation(Query.class);
         Query tools = ToolRepository.class
                 .getMethod("findVisibleFeaturedIds", Instant.class, Pageable.class).getAnnotation(Query.class);
 
         assertThat(featured.value()).contains("ArticleStatus.PUBLISHED", "article.publishedAt <= :now",
                 "article.contentType = com.blog.article.ContentType.ARTICLE");
-        assertThat(latest.value()).contains("ArticleStatus.PUBLISHED", "article.publishedAt <= :now");
+        assertThat(latest.value()).contains("ArticleStatus.PUBLISHED", "article.publishedAt <= :now",
+                "article.contentType = com.blog.article.ContentType.ARTICLE");
         assertThat(tools.value()).contains("ToolStatus.PUBLISHED", "tool.publishedAt <= :now", "tool.featured = true");
         EntityGraph site = SiteProfileRepository.class.getMethod("findFirstByOrderByIdAsc")
                 .getAnnotation(EntityGraph.class);

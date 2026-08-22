@@ -94,6 +94,23 @@ class SearchIntegrationTest {
         assertThat(result.total()).isEqualTo(3);
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void repositorySearchesToolSummaryInBothCountAndContentQueries() {
+        when(jdbc.queryForObject(anyString(), any(SqlParameterSource.class), eq(Long.class))).thenReturn(1L);
+        when(jdbc.query(anyString(), any(SqlParameterSource.class), any(RowMapper.class))).thenReturn(List.of());
+
+        new SearchRepository(jdbc).search("summary-only", 0, 20, NOW);
+
+        ArgumentCaptor<String> countSql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> contentSql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).queryForObject(countSql.capture(), any(SqlParameterSource.class), eq(Long.class));
+        verify(jdbc).query(contentSql.capture(), any(SqlParameterSource.class), any(RowMapper.class));
+        String summaryPredicate = "LOWER(COALESCE(tl.summary, '')) LIKE :pattern ESCAPE '!'";
+        assertThat(countSql.getValue()).contains(summaryPredicate);
+        assertThat(contentSql.getValue()).contains(summaryPredicate);
+    }
+
     private SearchService service() {
         return new SearchService(searchRepository, Clock.fixed(NOW, ZoneOffset.UTC));
     }

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 
@@ -18,12 +19,14 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -95,16 +98,39 @@ class SitemapControllerTest {
         assertThat(topics.value()).startsWith("select topic.id as id, topic.slug as slug");
     }
 
+    @Test
+    void articleKeysetBatchContinuesAfterFiveHundredAndTerminatesOnTheShortPage() {
+        List<ArticleRepository.SitemapRow> firstPage = LongStream.rangeClosed(1, 500)
+                .mapToObj(id -> article(id, "batch-" + id)).toList();
+        List<ArticleRepository.SitemapRow> lastPage = List.of(article(501, "batch-501"));
+        when(articleRepository.findVisibleSitemapBatch(0L, NOW, PageRequest.of(0, 500)))
+                .thenReturn(firstPage);
+        when(articleRepository.findVisibleSitemapBatch(500L, NOW, PageRequest.of(0, 500)))
+                .thenReturn(lastPage);
+
+        String xml = service("https://example.com").generate();
+
+        verify(articleRepository).findVisibleSitemapBatch(0L, NOW,
+                PageRequest.of(0, 500));
+        verify(articleRepository).findVisibleSitemapBatch(500L, NOW,
+                PageRequest.of(0, 500));
+        verifyNoMoreInteractions(articleRepository);
+        assertThat(xml).containsOnlyOnce("/articles/batch-1</loc>")
+                .containsOnlyOnce("/articles/batch-500</loc>")
+                .containsOnlyOnce("/articles/batch-501</loc>");
+        assertThat(org.springframework.util.StringUtils.countOccurrencesOf(xml, "/articles/batch-")).isEqualTo(501);
+    }
+
     private SitemapService service(String baseUrl) {
         return new SitemapService(articleRepository, topicRepository, toolRepository,
                 Clock.fixed(NOW, ZoneOffset.UTC), baseUrl);
     }
 
     private static ArticleRepository.SitemapRow article(long id, String slug) {
-        ArticleRepository.SitemapRow article = mock(ArticleRepository.SitemapRow.class);
-        when(article.getId()).thenReturn(id);
-        when(article.getSlug()).thenReturn(slug);
-        return article;
+        return new ArticleRepository.SitemapRow() {
+            @Override public Long getId() { return id; }
+            @Override public String getSlug() { return slug; }
+        };
     }
 
     private static TopicRepository.SitemapRow topic(long id, String slug) {

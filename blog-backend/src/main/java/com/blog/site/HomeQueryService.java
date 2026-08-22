@@ -53,7 +53,7 @@ public class HomeQueryService {
         Instant now = clock.instant();
         List<Long> featuredIds = articleRepository.findNewestVisibleArticleIds(now, PageRequest.of(0, 1));
         Long featuredId = featuredIds.isEmpty() ? null : featuredIds.getFirst();
-        List<Long> latestCandidateIds = articleRepository.findLatestVisibleIds(now, PageRequest.of(0, 5));
+        List<Long> latestCandidateIds = articleRepository.findLatestVisibleArticleIds(now, PageRequest.of(0, 5));
         List<Long> articleIds = java.util.stream.Stream.concat(featuredIds.stream(), latestCandidateIds.stream())
                 .distinct().toList();
         Map<Long, ArticleSummaryResponse> articles = articleSummaries(articleIds, now);

@@ -55,8 +55,9 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
 
     @Query("select article.id from PublishingArticle article "
             + "where article.status = com.blog.article.ArticleStatus.PUBLISHED and article.publishedAt <= :now "
+            + "and article.contentType = com.blog.article.ContentType.ARTICLE "
             + "order by article.publishedAt desc, article.id desc")
-    List<Long> findLatestVisibleIds(@Param("now") Instant now, Pageable pageable);
+    List<Long> findLatestVisibleArticleIds(@Param("now") Instant now, Pageable pageable);
 
     @EntityGraph(attributePaths = {"coverMedia", "category", "tags"})
     @Query("select distinct article from PublishingArticle article where article.id in :ids "
