@@ -28,12 +28,16 @@ public class TopicMembershipManager {
             return;
         }
         if (existing != null) {
+            articleRepository.saveAndFlush(article);
             topicArticleRepository.deleteByArticleId(article.getId());
+            articleRepository.saveAndFlush(article);
             compact(existing.getTopicId());
+        } else if (targetTopicId != null) {
+            articleRepository.saveAndFlush(article);
         }
         if (targetTopicId != null) {
             int order = compact(targetTopicId);
-            topicArticleRepository.save(placement(targetTopicId, article.getId(), order));
+            topicArticleRepository.saveAllAndFlush(List.of(placement(targetTopicId, article.getId(), order)));
         }
     }
 
@@ -47,16 +51,6 @@ public class TopicMembershipManager {
         for (Article article : requested) {
             topicArticleRepository.findByArticleId(article.getId())
                     .ifPresent(placement -> requestedExisting.put(article.getId(), placement));
-        }
-
-        topicArticleRepository.deleteByTopicId(topic.getId());
-        Set<Long> compactTopics = new LinkedHashSet<>();
-        for (Article article : requested) {
-            TopicArticle existing = requestedExisting.get(article.getId());
-            if (existing != null && !existing.getTopicId().equals(topic.getId())) {
-                topicArticleRepository.deleteByArticleId(article.getId());
-                compactTopics.add(existing.getTopicId());
-            }
         }
 
         Set<Long> requestedIds = requested.stream().map(Article::getId)
@@ -75,10 +69,27 @@ public class TopicMembershipManager {
         currentArticles.forEach(article -> changed.put(article.getId(), article));
         requested.forEach(article -> changed.put(article.getId(), article));
         if (!changed.isEmpty()) {
-            articleRepository.saveAll(changed.values());
+            articleRepository.saveAllAndFlush(changed.values());
+        }
+
+        topicArticleRepository.deleteByTopicId(topic.getId());
+        Set<Long> compactTopics = new LinkedHashSet<>();
+        for (Article article : requested) {
+            TopicArticle existing = requestedExisting.get(article.getId());
+            if (existing != null && !existing.getTopicId().equals(topic.getId())) {
+                topicArticleRepository.deleteByArticleId(article.getId());
+                compactTopics.add(existing.getTopicId());
+            }
+        }
+
+        if (!changed.isEmpty()) {
+            articleRepository.saveAllAndFlush(changed.values());
         }
         compactTopics.forEach(this::compact);
-        topicArticleRepository.saveAll(placements(topic.getId(), requested));
+        List<TopicArticle> replacement = placements(topic.getId(), requested);
+        if (!replacement.isEmpty()) {
+            topicArticleRepository.saveAllAndFlush(replacement);
+        }
     }
 
     private int compact(long topicId) {
@@ -87,7 +98,7 @@ public class TopicMembershipManager {
             placements.get(index).setSortOrder(index);
         }
         if (!placements.isEmpty()) {
-            topicArticleRepository.saveAll(placements);
+            topicArticleRepository.saveAllAndFlush(placements);
         }
         return placements.size();
     }

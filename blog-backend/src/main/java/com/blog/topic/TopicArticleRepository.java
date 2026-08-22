@@ -12,11 +12,11 @@ public interface TopicArticleRepository extends JpaRepository<TopicArticle, Topi
     List<TopicArticle> findByTopicIdOrderBySortOrderAsc(long topicId);
     Optional<TopicArticle> findByArticleId(long articleId);
 
-    @Modifying(flushAutomatically = true)
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("delete from TopicArticle article where article.topicId = :topicId")
     void deleteByTopicId(@Param("topicId") long topicId);
 
-    @Modifying(flushAutomatically = true)
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("delete from TopicArticle article where article.articleId = :articleId")
     void deleteByArticleId(@Param("articleId") long articleId);
 

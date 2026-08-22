@@ -15,6 +15,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.ArgumentMatchers.any;
 
 @ExtendWith(MockitoExtension.class)
 class TopicMembershipManagerTest {
@@ -34,12 +36,16 @@ class TopicMembershipManagerTest {
 
         manager.synchronizeArticle(moving);
 
-        verify(topicArticleRepository).deleteByArticleId(10L);
-        ArgumentCaptor<TopicArticle> saved = ArgumentCaptor.forClass(TopicArticle.class);
-        verify(topicArticleRepository).save(saved.capture());
-        assertThat(saved.getValue().getTopicId()).isEqualTo(2L);
-        assertThat(saved.getValue().getArticleId()).isEqualTo(10L);
-        assertThat(saved.getValue().getSortOrder()).isEqualTo(1);
+        var persistenceOrder = inOrder(articleRepository, topicArticleRepository);
+        persistenceOrder.verify(articleRepository).saveAndFlush(moving);
+        persistenceOrder.verify(topicArticleRepository).deleteByArticleId(10L);
+        persistenceOrder.verify(articleRepository).saveAndFlush(moving);
+        ArgumentCaptor<List<TopicArticle>> saved = ArgumentCaptor.forClass(List.class);
+        verify(topicArticleRepository, atLeastOnce()).saveAllAndFlush(saved.capture());
+        TopicArticle inserted = saved.getAllValues().getLast().getFirst();
+        assertThat(inserted.getTopicId()).isEqualTo(2L);
+        assertThat(inserted.getArticleId()).isEqualTo(10L);
+        assertThat(inserted.getSortOrder()).isEqualTo(1);
         assertThat(oldRemaining.getSortOrder()).isZero();
     }
 
@@ -79,8 +85,13 @@ class TopicMembershipManagerTest {
         assertThat(retained.getTopic()).isSameAs(target);
         assertThat(moved.getTopic()).isSameAs(target);
         assertThat(otherRemaining.getSortOrder()).isZero();
+        var persistenceOrder = inOrder(articleRepository, topicArticleRepository);
+        persistenceOrder.verify(articleRepository).saveAllAndFlush(any());
+        persistenceOrder.verify(topicArticleRepository).deleteByTopicId(1L);
+        persistenceOrder.verify(topicArticleRepository).deleteByArticleId(12L);
+        persistenceOrder.verify(articleRepository).saveAllAndFlush(any());
         ArgumentCaptor<List<TopicArticle>> placements = ArgumentCaptor.forClass(List.class);
-        verify(topicArticleRepository, atLeastOnce()).saveAll(placements.capture());
+        verify(topicArticleRepository, atLeastOnce()).saveAllAndFlush(placements.capture());
         List<TopicArticle> exact = placements.getAllValues().getLast();
         assertThat(exact).extracting(TopicArticle::getArticleId).containsExactly(11L, 12L);
         assertThat(exact).extracting(TopicArticle::getSortOrder).containsExactly(0, 1);

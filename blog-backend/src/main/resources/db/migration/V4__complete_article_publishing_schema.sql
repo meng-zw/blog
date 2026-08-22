@@ -1,6 +1,3 @@
-ALTER TABLE topic_article
-    ADD CONSTRAINT uk_topic_article_single_article UNIQUE (article_id);
-
 ALTER TABLE article
     CHANGE COLUMN html_content rendered_html LONGTEXT NULL,
     MODIFY COLUMN author_id BIGINT NULL,
@@ -12,7 +9,3 @@ ALTER TABLE article
     ADD CONSTRAINT fk_article_topic FOREIGN KEY (topic_id) REFERENCES topic (id),
     ADD KEY idx_article_public_order (content_type, status, published_at, id),
     ADD KEY idx_article_topic (topic_id);
-
-UPDATE article article_row
-JOIN topic_article membership ON membership.article_id = article_row.id
-SET article_row.topic_id = membership.topic_id;
