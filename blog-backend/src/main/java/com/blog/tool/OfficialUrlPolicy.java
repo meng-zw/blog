@@ -97,7 +97,7 @@ public final class OfficialUrlPolicy {
     }
 
     private static void rejectDecodedControls(String component) {
-        if (component != null && component.codePoints().anyMatch(codePoint -> codePoint <= 0x1f || codePoint == 0x7f)) {
+        if (component != null && component.codePoints().anyMatch(Character::isISOControl)) {
             throw new IllegalArgumentException("Official URL contains a control character");
         }
     }

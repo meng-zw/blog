@@ -24,7 +24,7 @@ class OfficialUrlPolicyTest {
     @Test
     void rejectsInvalidAceAndPercentEncodedControlsWithoutRejectingLegitimateEscapes() {
         for (String value : new String[]{"https://xn--a.example", "https://example.com/%00", "https://example.com/?q=%0d%0a",
-                "https://example.com/#%7f"}) {
+                "https://example.com/#%7f", "https://example.com/%C2%85"}) {
             assertThatIllegalArgumentException().isThrownBy(() -> OfficialUrlPolicy.normalize(value));
         }
         assertThat(OfficialUrlPolicy.normalize("https://example.com/a%20b?q=%E4%BD%A0%E5%A5%BD"))

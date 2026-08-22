@@ -5,11 +5,25 @@ import com.blog.taxonomy.CategoryRepository;
 import com.blog.taxonomy.CategoryScope;
 import com.blog.taxonomy.Tag;
 import com.blog.taxonomy.TagRepository;
+import com.blog.taxonomy.SlugAllocationLock;
+import com.blog.taxonomy.SlugAllocationLockRepository;
+import com.blog.media.MediaAsset;
+import com.blog.media.MediaAssetRepository;
+import com.blog.article.MarkdownRenderer;
+import com.blog.taxonomy.TaxonomyService;
 import com.blog.tool.dto.ToolWriteRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.SpringBootConfiguration;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfiguration;
+import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.context.annotation.Import;
+import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -29,9 +43,19 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest(properties = {"spring.jpa.open-in-view=false", "spring.jpa.hibernate.ddl-auto=none", "blog.admin.bootstrap.username=", "spring.task.scheduling.enabled=false"})
+@SpringBootTest(classes = ToolPublishingMySqlIntegrationTest.ToolTestApplication.class, properties = {"spring.jpa.open-in-view=false", "spring.jpa.hibernate.ddl-auto=none", "spring.task.scheduling.enabled=false"})
 @ActiveProfiles("test")
 class ToolPublishingMySqlIntegrationTest {
+    @SpringBootConfiguration
+    @EnableAutoConfiguration(exclude = JpaRepositoriesAutoConfiguration.class)
+    @EntityScan(basePackageClasses = {Tool.class, Category.class, Tag.class, MediaAsset.class, SlugAllocationLock.class})
+    @EnableJpaRepositories(basePackageClasses = {ToolRepository.class, CategoryRepository.class, TagRepository.class,
+            MediaAssetRepository.class, SlugAllocationLockRepository.class})
+    @EnableTransactionManagement
+    @EnableJpaAuditing
+    @Import({ToolService.class, TaxonomyService.class, MarkdownRenderer.class})
+    static class ToolTestApplication {
+    }
     @Container
     static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4");
 

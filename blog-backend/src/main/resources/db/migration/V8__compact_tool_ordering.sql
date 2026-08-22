@@ -5,7 +5,7 @@ CREATE TEMPORARY TABLE compact_tool_order (
 ) ENGINE=InnoDB;
 
 INSERT INTO compact_tool_order (id, sort_order)
-SELECT id, ROW_NUMBER() OVER (ORDER BY id) - 1
+SELECT id, ROW_NUMBER() OVER (ORDER BY sort_order, id) - 1
 FROM tool;
 
 START TRANSACTION;

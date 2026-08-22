@@ -36,6 +36,8 @@ class ToolMigrationMySqlIntegrationTest {
             statement.executeUpdate("update tool set sort_order=19 where id=1");
             statement.executeUpdate("insert into tool(name,slug,description_markdown,official_url,status,featured,sort_order) "
                     + "values ('Second','second','body','https://example.com','DRAFT',0,7)");
+            statement.executeUpdate("insert into tool(name,slug,description_markdown,official_url,status,featured,sort_order) "
+                    + "values ('Third','third','body','https://example.com','DRAFT',0,7)");
         }
         var result = Flyway.configure().dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .load().migrate();
@@ -54,8 +56,13 @@ class ToolMigrationMySqlIntegrationTest {
             Assertions.assertThat(legacy.getString("summary")).isNull();
             var orders = statement.executeQuery("select id,sort_order from tool order by id");
             Assertions.assertThat(orders.next()).isTrue();
+            Assertions.assertThat(orders.getLong("id")).isEqualTo(1L);
+            Assertions.assertThat(orders.getInt("sort_order")).isEqualTo(2);
+            Assertions.assertThat(orders.next()).isTrue();
+            Assertions.assertThat(orders.getLong("id")).isEqualTo(2L);
             Assertions.assertThat(orders.getInt("sort_order")).isZero();
             Assertions.assertThat(orders.next()).isTrue();
+            Assertions.assertThat(orders.getLong("id")).isEqualTo(3L);
             Assertions.assertThat(orders.getInt("sort_order")).isEqualTo(1);
 
             statement.executeUpdate("insert into tool(name,slug,description_markdown,official_url,status,featured,sort_order) "
