@@ -20,6 +20,8 @@ spring:
 
 server:
   port: 8081
+  # Direct/default deployments never trust client-supplied forwarding headers.
+  forward-headers-strategy: none
   servlet:
     context-path: /api
     session:

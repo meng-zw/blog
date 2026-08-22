@@ -10,6 +10,9 @@ spring:
   flyway:
     enabled: true
 server:
+  # Production is valid only behind the private, same-origin Nginx proxy below.
+  # Nginx overwrites forwarding headers and the backend port must not be public.
+  forward-headers-strategy: framework
   servlet:
     session:
       cookie:

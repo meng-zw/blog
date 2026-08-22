@@ -25,7 +25,13 @@ server {
         proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # Security boundary: never append an untrusted client-supplied chain.
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        # Spring also understands RFC 7239; strip any client-supplied value.
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Forwarded-Prefix "";
     }
 }

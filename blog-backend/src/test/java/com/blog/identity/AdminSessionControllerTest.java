@@ -1,6 +1,7 @@
 package com.blog.identity;
 
 import com.blog.config.SecurityConfig;
+import com.blog.shared.error.GlobalExceptionHandler;
 import com.blog.shared.web.TraceIdFilter;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpSession;
@@ -8,6 +9,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
+import org.springframework.boot.autoconfigure.web.servlet.ServletWebServerFactoryAutoConfiguration;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.core.context.SecurityContext;
@@ -17,14 +20,16 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 import org.springframework.security.web.FilterChainProxy;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -44,7 +49,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(controllers = {AdminSessionController.class, AdminAccountController.class, PublicPingController.class})
 @ContextConfiguration(classes = {AdminSessionController.class, AdminAccountController.class,
         PublicPingController.class, SecurityConfig.class, AdminUserDetailsService.class,
-        LoginAttemptService.class, TraceIdFilter.class})
+        LoginAttemptService.class, TraceIdFilter.class, GlobalExceptionHandler.class})
+@ImportAutoConfiguration(ServletWebServerFactoryAutoConfiguration.class)
+@ActiveProfiles("prod")
 class AdminSessionControllerTest {
 
     private static final String USERNAME = "owner";
@@ -64,6 +71,9 @@ class AdminSessionControllerTest {
 
     @Autowired
     private FilterChainProxy filterChainProxy;
+
+    @Autowired
+    private LoginAttemptService loginAttemptService;
 
     @MockitoBean
     private AdminAccountRepository repository;
@@ -233,6 +243,57 @@ class AdminSessionControllerTest {
         assertTrue(sessionRegistry.getSessionInformation("other-session").isExpired());
     }
 
+    @Test
+    void forwardedClientIpsUseIndependentFailureBuckets() throws Exception {
+        String firstIp = "198.51.100.10";
+        String secondIp = "203.0.113.20";
+
+        for (int attempt = 0; attempt < 5; attempt++) {
+            failedLogin(USERNAME, "wrong password", firstIp)
+                    .andExpect(status().isUnauthorized());
+        }
+
+        assertTrue(loginAttemptService.isBlocked(USERNAME, firstIp));
+        assertFalse(loginAttemptService.isBlocked(USERNAME, secondIp));
+
+        for (int attempt = 0; attempt < 5; attempt++) {
+            failedLogin(USERNAME, "wrong password", secondIp)
+                    .andExpect(status().isUnauthorized());
+        }
+
+        assertTrue(loginAttemptService.isBlocked(USERNAME, secondIp));
+    }
+
+    @Test
+    void oversizedUsernameReturnsProblemWithoutAddingThrottleEntry() throws Exception {
+        String oversizedUsername = "u".repeat(101);
+        String clientIp = "198.51.100.31";
+
+        for (int attempt = 0; attempt < 5; attempt++) {
+            failedLogin(oversizedUsername, PASSWORD, clientIp)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                    .andExpect(jsonPath("$.traceId").isNotEmpty());
+        }
+
+        assertFalse(loginAttemptService.isBlocked(oversizedUsername, clientIp));
+    }
+
+    @Test
+    void oversizedPasswordReturnsProblemWithoutAddingThrottleEntry() throws Exception {
+        String oversizedPassword = "p".repeat(73);
+        String clientIp = "198.51.100.32";
+
+        for (int attempt = 0; attempt < 5; attempt++) {
+            failedLogin(USERNAME, oversizedPassword, clientIp)
+                    .andExpect(status().isBadRequest())
+                    .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                    .andExpect(jsonPath("$.traceId").isNotEmpty());
+        }
+
+        assertFalse(loginAttemptService.isBlocked(USERNAME, clientIp));
+    }
+
     private HttpSession login(MockHttpSession session) throws Exception {
         return mockMvc.perform(post("/api/admin/session")
                         .contextPath("/api")
@@ -244,6 +305,18 @@ class AdminSessionControllerTest {
                 .andReturn()
                 .getRequest()
                 .getSession(false);
+    }
+
+    private org.springframework.test.web.servlet.ResultActions failedLogin(
+            String username, String password, String forwardedIp) throws Exception {
+        return mockMvc.perform(post("/api/admin/session")
+                .contextPath("/api")
+                .remoteAddress("172.20.0.10")
+                .header("X-Forwarded-For", forwardedIp)
+                .header("X-Forwarded-Proto", "https")
+                .with(csrf())
+                .contentType("application/json")
+                .content("{\"username\":\"" + username + "\",\"password\":\"" + password + "\"}"));
     }
 
     private static org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder apiGet(String path) {
