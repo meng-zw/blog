@@ -220,7 +220,7 @@ class ToolServiceTest {
         when(toolRepository.findAllForReorder()).thenReturn(List.of(first, second));
 
         assertThatThrownBy(() -> toolService.reorder(List.of(2L, 2L))).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> toolService.reorder(List.of(1L))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> toolService.reorder(List.of(1L))).isInstanceOf(ConflictException.class);
         verify(toolRepository, never()).saveAll(any());
 
         toolService.reorder(List.of(2L, 1L));

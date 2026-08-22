@@ -165,7 +165,7 @@ public class ToolService {
         List<Tool> tools = toolRepository.findAllForReorder();
         Map<Long, Tool> byId = tools.stream().collect(Collectors.toMap(Tool::getId, Function.identity()));
         if (byId.size() != orderedIds.size() || !byId.keySet().equals(Set.copyOf(orderedIds))) {
-            throw new IllegalArgumentException("Tool IDs must exactly match all tools");
+            throw new ConflictException("Tool IDs no longer match the complete tool list");
         }
         List<Tool> reordered = orderedIds.stream().map(byId::get).toList();
         for (int index = 0; index < reordered.size(); index++) {
