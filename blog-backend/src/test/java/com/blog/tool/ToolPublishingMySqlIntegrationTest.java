@@ -24,11 +24,12 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest(properties = {"spring.jpa.open-in-view=false"})
+@SpringBootTest(properties = {"spring.jpa.open-in-view=false", "spring.jpa.hibernate.ddl-auto=none", "blog.admin.bootstrap.username=", "spring.task.scheduling.enabled=false"})
 @ActiveProfiles("test")
 class ToolPublishingMySqlIntegrationTest {
     @Container
@@ -68,7 +69,9 @@ class ToolPublishingMySqlIntegrationTest {
         second.setCategory(java);
         second.setTags(Set.of(spring));
         toolRepository.save(second);
-        toolRepository.save(visible("Draft", "draft", 0, true, Instant.parse("2026-08-22T00:00:00Z")));
+        Tool draftFixture = visible("Draft", "draft", 0, true, Instant.parse("2026-08-22T00:00:00Z"));
+        draftFixture.setStatus(ToolStatus.DRAFT);
+        toolRepository.save(draftFixture);
         Tool future = visible("Future", "future", 0, true, Instant.now().plusSeconds(3600));
         toolRepository.save(future);
 
@@ -97,10 +100,22 @@ class ToolPublishingMySqlIntegrationTest {
         var second = executor.submit(create);
         start.countDown();
 
-        List<String> outcomes = List.of(first.get(), second.get());
+        List<String> outcomes = List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
         executor.shutdown();
         assertThat(outcomes).contains("same-slug", "ConflictException");
         assertThat(toolRepository.findAll()).extracting(Tool::getSortOrder).containsExactly(0);
+    }
+
+    @Test
+    void twoDistinctConcurrentCreatesAppendDistinctContiguousPositions() throws Exception {
+        var executor = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        var first = executor.submit(() -> { start.await(); return toolService.createDraft(request("One", "one")).id(); });
+        var second = executor.submit(() -> { start.await(); return toolService.createDraft(request("Two", "two")).id(); });
+        start.countDown();
+        assertThat(List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS))).doesNotHaveDuplicates();
+        executor.shutdown();
+        assertThat(toolRepository.findAll().stream().map(Tool::getSortOrder).sorted().toList()).containsExactly(0, 1);
     }
 
     @Test
@@ -118,8 +133,8 @@ class ToolPublishingMySqlIntegrationTest {
         var reorder = executor.submit(() -> { start.await(); toolService.reorder(List.of(draftId, publishedId)); return true; });
         var publish = executor.submit(() -> { start.await(); toolService.publish(draftId); return true; });
         start.countDown();
-        assertThat(reorder.get()).isTrue();
-        assertThat(publish.get()).isTrue();
+        assertThat(reorder.get(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(publish.get(10, TimeUnit.SECONDS)).isTrue();
         executor.shutdown();
 
         assertThat(toolRepository.findAll().stream().sorted(Comparator.comparingInt(Tool::getSortOrder)).toList())
@@ -127,6 +142,8 @@ class ToolPublishingMySqlIntegrationTest {
         assertThat(toolRepository.findAll().stream().sorted(Comparator.comparingInt(Tool::getSortOrder)).toList())
                 .extracting(Tool::getSortOrder).containsExactly(0, 1);
         assertThat(toolRepository.findById(draftId).orElseThrow().getStatus()).isEqualTo(ToolStatus.PUBLISHED);
+        toolService.archive(draftId);
+        assertThat(toolRepository.findById(draftId).orElseThrow().getSortOrder()).isZero();
     }
 
     private Category category(String name, String slug) {

@@ -28,6 +28,9 @@ public final class OfficialUrlPolicy {
                     || uri.getRawUserInfo() != null) {
                 throw new IllegalArgumentException("Official URL must be an absolute HTTPS URL without user info");
             }
+            rejectDecodedControls(uri.getPath());
+            rejectDecodedControls(uri.getQuery());
+            rejectDecodedControls(uri.getFragment());
             Authority authority = authority(uri.getRawAuthority());
             StringBuilder canonical = new StringBuilder("https://").append(authority.host());
             if (authority.port() != -1) canonical.append(':').append(authority.port());
@@ -71,6 +74,13 @@ public final class OfficialUrlPolicy {
             if (label.isEmpty() || label.length() > 63 || label.startsWith("-") || label.endsWith("-")) {
                 throw new IllegalArgumentException("Official URL host is invalid");
             }
+            if (label.startsWith("xn--")) {
+                String unicode = IDN.toUnicode(label);
+                if (unicode.equals(label) || !IDN.toASCII(unicode, IDN.USE_STD3_ASCII_RULES)
+                        .equalsIgnoreCase(label)) {
+                    throw new IllegalArgumentException("Official URL ACE host is invalid");
+                }
+            }
         }
         int port = -1;
         if (rawPort != null) {
@@ -84,6 +94,12 @@ public final class OfficialUrlPolicy {
             }
         }
         return new Authority(host, port);
+    }
+
+    private static void rejectDecodedControls(String component) {
+        if (component != null && component.codePoints().anyMatch(codePoint -> codePoint <= 0x1f || codePoint == 0x7f)) {
+            throw new IllegalArgumentException("Official URL contains a control character");
+        }
     }
 
     private record Authority(String host, int port) {

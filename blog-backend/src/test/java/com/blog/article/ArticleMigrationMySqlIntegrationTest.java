@@ -53,7 +53,7 @@ class ArticleMigrationMySqlIntegrationTest {
 
         var result = Flyway.configure().dataSource(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword())
                 .load().migrate();
-        assertThat(result.targetSchemaVersion).isEqualTo("7");
+        assertThat(result.targetSchemaVersion).isEqualTo("8");
 
         try (var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
              var statement = connection.createStatement()) {

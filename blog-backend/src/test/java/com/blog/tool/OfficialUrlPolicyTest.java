@@ -22,6 +22,16 @@ class OfficialUrlPolicyTest {
     }
 
     @Test
+    void rejectsInvalidAceAndPercentEncodedControlsWithoutRejectingLegitimateEscapes() {
+        for (String value : new String[]{"https://xn--a.example", "https://example.com/%00", "https://example.com/?q=%0d%0a",
+                "https://example.com/#%7f"}) {
+            assertThatIllegalArgumentException().isThrownBy(() -> OfficialUrlPolicy.normalize(value));
+        }
+        assertThat(OfficialUrlPolicy.normalize("https://example.com/a%20b?q=%E4%BD%A0%E5%A5%BD"))
+                .isEqualTo("https://example.com/a%20b?q=%E4%BD%A0%E5%A5%BD");
+    }
+
+    @Test
     void preservesValidCustomPort() {
         assertThat(OfficialUrlPolicy.normalize("https://EXAMPLE.com:8443/docs"))
                 .isEqualTo("https://example.com:8443/docs");

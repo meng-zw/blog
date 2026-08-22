@@ -243,6 +243,23 @@ class ToolServiceTest {
         verify(slugAllocationLockRepository).lockSingleton();
     }
 
+    @Test
+    void deleteCompactsEveryRemainingStatusUnderTheSharedMutex() {
+        Tool first = tool(1L, ToolStatus.PUBLISHED, "body");
+        Tool deleted = tool(2L, ToolStatus.ARCHIVED, "body");
+        Tool last = tool(3L, ToolStatus.DRAFT, "body");
+        first.setSortOrder(4); deleted.setSortOrder(7); last.setSortOrder(9);
+        when(toolRepository.findById(2L)).thenReturn(Optional.of(deleted));
+        when(toolRepository.findAllForReorder()).thenReturn(List.of(first, deleted, last));
+
+        toolService.delete(2L);
+
+        verify(toolRepository).delete(deleted);
+        assertThat(first.getSortOrder()).isZero();
+        assertThat(last.getSortOrder()).isEqualTo(1);
+        verify(toolRepository).saveAll(List.of(first, last));
+    }
+
     private static ToolWriteRequest request(String name, String slug, String summary, String markdown, String officialUrl,
                                             Long coverMediaId, Long categoryId, Set<Long> tagIds, boolean featured,
                                             int sortOrder) {

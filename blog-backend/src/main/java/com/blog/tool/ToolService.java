@@ -115,6 +115,16 @@ public class ToolService {
         return adminDetail(toolRepository.save(tool));
     }
 
+    @Transactional
+    public void delete(long id) {
+        slugAllocationLockRepository.lockSingleton();
+        Tool tool = requireTool(id);
+        List<Tool> remaining = toolRepository.findAllForReorder().stream().filter(candidate -> !candidate.getId().equals(id)).toList();
+        toolRepository.delete(tool);
+        for (int index = 0; index < remaining.size(); index++) remaining.get(index).setSortOrder(index);
+        if (!remaining.isEmpty()) toolRepository.saveAll(remaining);
+    }
+
     public PageResponse<ToolSummaryResponse> listPublic(int page, int size, String categorySlug, String tagSlug,
                                                          String keyword) {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Order.desc("featured"),
