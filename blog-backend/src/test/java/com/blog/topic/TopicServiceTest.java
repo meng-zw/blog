@@ -1,7 +1,9 @@
 package com.blog.topic;
 
 import com.blog.media.MediaAssetRepository;
+import com.blog.media.MediaAsset;
 import com.blog.taxonomy.SlugAllocationLockRepository;
+import com.blog.topic.dto.TopicWriteRequest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -18,6 +20,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.inOrder;
 
 @ExtendWith(MockitoExtension.class)
 class TopicServiceTest {
@@ -70,6 +73,51 @@ class TopicServiceTest {
     void createRejectsOmittedArticleIds() {
         assertThatIllegalArgumentException().isThrownBy(() -> topicService.create(
                 new com.blog.topic.dto.TopicWriteRequest("Java", null, null, TopicStatus.DRAFT, null, 0)));
+    }
+
+    @Test
+    void createPersistsContiguousReplacementAndLocksBeforeRepositoryRead() {
+        when(topicRepository.findByNormalizedName("java")).thenReturn(Optional.empty());
+        when(topicRepository.existsBySlug("java")).thenReturn(false);
+        when(topicRepository.save(any(Topic.class))).thenAnswer(i -> { Topic value = i.getArgument(0); value.setId(3L); return value; });
+        when(topicArticleRepository.countExistingArticlesByIds(List.of(11L, 22L))).thenReturn(2L);
+        topicService.create(new TopicWriteRequest("Java", null, null, TopicStatus.DRAFT, List.of(11L, 22L), 0));
+        var order = inOrder(slugAllocationLockRepository, topicRepository);
+        order.verify(slugAllocationLockRepository).lockSingleton();
+        order.verify(topicRepository).findByNormalizedName("java");
+        verify(topicArticleRepository).saveAll(any());
+    }
+
+    @Test
+    void updateWithEmptyListExplicitlyClearsArticles() {
+        Topic existing = topic(3L);
+        existing.setNormalizedName("java");
+        when(topicRepository.findById(3L)).thenReturn(Optional.of(existing));
+        when(topicRepository.findByNormalizedName("java")).thenReturn(Optional.of(existing));
+        when(topicRepository.save(existing)).thenReturn(existing);
+        topicService.update(3L, new TopicWriteRequest("Java", null, null, TopicStatus.DRAFT, List.of(), 0));
+        verify(topicArticleRepository).deleteByTopicId(3L);
+    }
+
+    @Test
+    void createRejectsUnknownArticleIdsBeforeAssociationMutation() {
+        when(topicRepository.findByNormalizedName("java")).thenReturn(Optional.empty());
+        when(topicRepository.existsBySlug("java")).thenReturn(false);
+        when(topicRepository.save(any(Topic.class))).thenAnswer(i -> { Topic value = i.getArgument(0); value.setId(3L); return value; });
+        when(topicArticleRepository.countExistingArticlesByIds(List.of(99L))).thenReturn(0L);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> topicService.create(
+                new TopicWriteRequest("Java", null, null, TopicStatus.DRAFT, List.of(99L), 0)))
+                .isInstanceOf(com.blog.shared.error.ResourceNotFoundException.class);
+    }
+
+    @Test
+    void invalidCoverMediaIsRejected() {
+        when(topicRepository.findByNormalizedName("java")).thenReturn(Optional.empty());
+        when(topicRepository.existsBySlug("java")).thenReturn(false);
+        when(mediaAssetRepository.findById(8L)).thenReturn(Optional.empty());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> topicService.create(
+                new TopicWriteRequest("Java", null, 8L, TopicStatus.DRAFT, List.of(), 0)))
+                .isInstanceOf(com.blog.shared.error.ResourceNotFoundException.class);
     }
 
     private static Topic topic(Long id) {
