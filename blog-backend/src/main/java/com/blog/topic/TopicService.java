@@ -56,6 +56,7 @@ public class TopicService {
 
     @Transactional
     public TopicResponse create(TopicWriteRequest request) {
+        slugAllocationLockRepository.lockSingleton();
         List<Long> articles = articleIds(request.articleIds());
         Topic topic = new Topic();
         apply(topic, request, null);
@@ -66,6 +67,7 @@ public class TopicService {
 
     @Transactional
     public TopicResponse update(long id, TopicWriteRequest request) {
+        slugAllocationLockRepository.lockSingleton();
         List<Long> articles = articleIds(request.articleIds());
         Topic topic = requireTopic(id);
         apply(topic, request, id);
@@ -94,7 +96,6 @@ public class TopicService {
     }
 
     private void apply(Topic topic, TopicWriteRequest request, Long currentId) {
-        slugAllocationLockRepository.acquire();
         String name = TaxonomyService.normalizedName(request.name());
         String normalizedName = TaxonomyService.normalizedKey(name);
         topicRepository.findByNormalizedName(normalizedName).filter(found -> !found.getId().equals(currentId))

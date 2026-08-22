@@ -18,7 +18,7 @@ public class Tag extends AuditedEntity {
     @Column(nullable = false, length = 120)
     private String name;
 
-    @Column(name = "normalized_name", nullable = false, length = 120, unique = true)
+    @Column(name = "normalized_name", nullable = false, length = 255, unique = true)
     private String normalizedName;
 
     @Column(nullable = false, unique = true, length = 160)

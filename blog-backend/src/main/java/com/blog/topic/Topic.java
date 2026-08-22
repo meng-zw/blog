@@ -24,7 +24,7 @@ public class Topic extends AuditedEntity {
     @Column(nullable = false, length = 160)
     private String name;
 
-    @Column(name = "normalized_name", nullable = false, length = 160, unique = true)
+    @Column(name = "normalized_name", nullable = false, length = 255, unique = true)
     private String normalizedName;
 
     @Column(nullable = false, unique = true, length = 180)

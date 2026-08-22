@@ -25,6 +25,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -71,6 +72,22 @@ class TaxonomyControllerTest {
                         .content("{\"name\":\"Java\",\"scope\":\"ARTICLE\",\"sort_order\":0}"))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.traceId").isNotEmpty());
+    }
+
+    @Test
+    void invalidScopeQueryReturnsProblemDetails() throws Exception {
+        mockMvc.perform(get("/api/public/taxonomy/categories").contextPath("/api").param("scope", "INVALID"))
+                .andExpect(status().isBadRequest()).andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.traceId").isNotEmpty());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void nonNumericAdminPathReturnsProblemDetails() throws Exception {
+        mockMvc.perform(put("/api/admin/taxonomy/categories/nope").contextPath("/api").with(csrf())
+                        .contentType("application/json").content("{\"name\":\"Java\",\"scope\":\"ARTICLE\",\"sort_order\":0}"))
+                .andExpect(status().isBadRequest()).andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.traceId").isNotEmpty());
     }
 }

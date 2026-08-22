@@ -69,6 +69,7 @@ public class TaxonomyService {
 
     @Transactional
     public CategoryResponse createCategory(CategoryRequest request) {
+        slugAllocationLockRepository.lockSingleton();
         Category category = new Category();
         apply(category, request, null);
         return categoryResponse(categoryRepository.save(category));
@@ -76,6 +77,7 @@ public class TaxonomyService {
 
     @Transactional
     public CategoryResponse updateCategory(long id, CategoryRequest request) {
+        slugAllocationLockRepository.lockSingleton();
         Category category = categoryRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Category", Long.toString(id)));
         apply(category, request, id);
@@ -95,6 +97,7 @@ public class TaxonomyService {
 
     @Transactional
     public TagResponse createTag(TagRequest request) {
+        slugAllocationLockRepository.lockSingleton();
         Tag tag = new Tag();
         apply(tag, request, null);
         return tagResponse(tagRepository.save(tag));
@@ -102,6 +105,7 @@ public class TaxonomyService {
 
     @Transactional
     public TagResponse updateTag(long id, TagRequest request) {
+        slugAllocationLockRepository.lockSingleton();
         Tag tag = tagRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Tag", Long.toString(id)));
         apply(tag, request, id);
@@ -120,7 +124,6 @@ public class TaxonomyService {
     }
 
     private void apply(Category category, CategoryRequest request, Long currentId) {
-        slugAllocationLockRepository.acquire();
         String name = normalizedName(request.name());
         String key = normalizedKey(name);
         rejectCategoryNameConflict(key, currentId);
@@ -138,7 +141,6 @@ public class TaxonomyService {
     }
 
     private void apply(Tag tag, TagRequest request, Long currentId) {
-        slugAllocationLockRepository.acquire();
         String name = normalizedName(request.name());
         String key = normalizedKey(name);
         rejectTagNameConflict(key, currentId);

@@ -8,5 +8,5 @@ import org.springframework.data.jpa.repository.Query;
 public interface SlugAllocationLockRepository extends JpaRepository<SlugAllocationLock, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select lock from SlugAllocationLock lock where lock.id = 1")
-    SlugAllocationLock acquire();
+    SlugAllocationLock lockSingleton();
 }

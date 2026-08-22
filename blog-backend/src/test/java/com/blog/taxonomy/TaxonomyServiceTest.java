@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -110,6 +111,21 @@ class TaxonomyServiceTest {
 
         assertThatThrownBy(() -> taxonomyService.updateCategory(8L,
                 new CategoryRequest("Editors", null, 0, CategoryScope.ARTICLE))).isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    void unicodeCaseFoldTreatsStrasseAndFullWidthNamesAsEquivalent() {
+        assertThat(TaxonomyService.normalizedKey("Straße")).isEqualTo(TaxonomyService.normalizedKey("STRASSE"));
+        assertThat(TaxonomyService.normalizedKey("Ｆｏｏ")).isEqualTo(TaxonomyService.normalizedKey("fOO"));
+    }
+
+    @Test
+    void locksBeforeRepositoryReadDuringCategoryCreate() {
+        when(categoryRepository.findByNormalizedName("java")).thenReturn(Optional.empty());
+        when(categoryRepository.existsBySlug("java")).thenReturn(false);
+        when(categoryRepository.save(any(Category.class))).thenAnswer(i -> i.getArgument(0));
+        taxonomyService.createCategory(new CategoryRequest("Java", null, 0, CategoryScope.ARTICLE));
+        inOrder(slugAllocationLockRepository, categoryRepository).verify(slugAllocationLockRepository).lockSingleton();
     }
 
     private static Category category(Long id, String name, CategoryScope scope) {
