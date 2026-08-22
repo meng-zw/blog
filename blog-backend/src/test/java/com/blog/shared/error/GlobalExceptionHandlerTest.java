@@ -33,12 +33,14 @@ class GlobalExceptionHandlerTest {
 
     @Test
     void returnsProblemDetailsAndTraceIdForMissingResource() throws Exception {
-        mockMvc.perform(get("/test/not-found"))
+        String traceId = "valid_Trace-Id1";
+
+        mockMvc.perform(get("/test/not-found").header("X-Trace-Id", traceId))
                 .andExpect(status().isNotFound())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
-                .andExpect(header().string("X-Trace-Id", org.hamcrest.Matchers.matchesPattern("[A-Za-z0-9_-]{8,64}")))
+                .andExpect(header().string("X-Trace-Id", traceId))
                 .andExpect(jsonPath("$.detail").value("article not found: missing"))
-                .andExpect(jsonPath("$.traceId").isNotEmpty());
+                .andExpect(jsonPath("$.traceId").value(traceId));
     }
 
     @Test
