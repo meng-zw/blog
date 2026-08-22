@@ -19,6 +19,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -142,6 +143,19 @@ class TaxonomyServiceTest {
         when(categoryRepository.existsBySlug(boundary)).thenReturn(false);
         when(categoryRepository.save(any(Category.class))).thenAnswer(i -> i.getArgument(0));
         assertThat(taxonomyService.createCategory(new CategoryRequest(boundary, null, 0, CategoryScope.ARTICLE)).name()).hasSize(120);
+    }
+
+    @Test
+    void rejectsFoldOnlyExpansionBeyondKeyColumnBeforeAnyTaxonomyRepositoryAccess() {
+        String foldExpanding = "\u0390".repeat(86);
+        assertThat(foldExpanding).hasSizeLessThanOrEqualTo(120);
+        assertThat(TaxonomyService.normalizedName(foldExpanding)).hasSizeLessThanOrEqualTo(120);
+        assertThat(TaxonomyService.normalizedKey(foldExpanding)).hasSizeGreaterThan(255);
+
+        assertThatIllegalArgumentException().isThrownBy(() -> taxonomyService.createTag(new TagRequest(foldExpanding)));
+
+        verify(tagRepository, never()).findByNormalizedName(any());
+        verify(tagRepository, never()).save(any());
     }
 
     private static Category category(Long id, String name, CategoryScope scope) {

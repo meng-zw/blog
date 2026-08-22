@@ -1,5 +1,8 @@
 package com.blog.topic;
 
+import com.blog.article.Article;
+import com.blog.article.ArticleRepository;
+import com.blog.article.ArticleService;
 import com.blog.media.MediaAsset;
 import com.blog.media.MediaAssetRepository;
 import com.blog.shared.error.ConflictException;
@@ -7,6 +10,7 @@ import com.blog.shared.error.ResourceNotFoundException;
 import com.blog.taxonomy.TaxonomyService;
 import com.blog.taxonomy.SlugAllocationLockRepository;
 import com.blog.topic.dto.TopicResponse;
+import com.blog.topic.dto.TopicDetailResponse;
 import com.blog.topic.dto.TopicWriteRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,6 +21,7 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.time.Instant;
 
 @Service
 @Transactional(readOnly = true)
@@ -25,13 +30,16 @@ public class TopicService {
     private final TopicArticleRepository topicArticleRepository;
     private final MediaAssetRepository mediaAssetRepository;
     private final SlugAllocationLockRepository slugAllocationLockRepository;
+    private final ArticleRepository articleRepository;
 
     public TopicService(TopicRepository topicRepository, TopicArticleRepository topicArticleRepository,
-                        MediaAssetRepository mediaAssetRepository, SlugAllocationLockRepository slugAllocationLockRepository) {
+                        MediaAssetRepository mediaAssetRepository, SlugAllocationLockRepository slugAllocationLockRepository,
+                        ArticleRepository articleRepository) {
         this.topicRepository = topicRepository;
         this.topicArticleRepository = topicArticleRepository;
         this.mediaAssetRepository = mediaAssetRepository;
         this.slugAllocationLockRepository = slugAllocationLockRepository;
+        this.articleRepository = articleRepository;
     }
 
     public List<TopicResponse> listAdmin() {
@@ -52,6 +60,21 @@ public class TopicService {
                 .filter(found -> found.getStatus() == TopicStatus.PUBLISHED)
                 .orElseThrow(() -> new ResourceNotFoundException("Published topic", slug));
         return response(topic);
+    }
+
+    public TopicDetailResponse findPublishedDetailBySlug(String slug) {
+        Topic topic = topicRepository.findBySlug(slug)
+                .filter(found -> found.getStatus() == TopicStatus.PUBLISHED)
+                .orElseThrow(() -> new ResourceNotFoundException("Published topic", slug));
+        Instant now = Instant.now();
+        List<com.blog.article.dto.ArticleSummaryResponse> articles = articleRepository
+                .findVisibleForTopic(topic.getId(), now).stream()
+                .filter(article -> visible(article, now))
+                .map(ArticleService::summary)
+                .toList();
+        TopicResponse metadata = response(topic);
+        return new TopicDetailResponse(metadata.id(), metadata.name(), metadata.slug(), metadata.description(),
+                metadata.coverUrl(), metadata.status(), metadata.sortOrder(), articles);
     }
 
     @Transactional
@@ -106,8 +129,7 @@ public class TopicService {
         if (!normalizedName.equals(topic.getNormalizedName())) topic.setSlug(nextSlug(TaxonomyService.slugBase(name, "topic"), topic.getSlug()));
         topic.setNormalizedName(normalizedName);
         topic.setDescription(request.description() == null ? null : Normalizer.normalize(request.description(), Normalizer.Form.NFKC).trim());
-        topic.setCoverMedia(request.coverMediaId() == null ? null : mediaAssetRepository.findById(request.coverMediaId())
-                .orElseThrow(() -> new ResourceNotFoundException("Cover media asset", request.coverMediaId().toString())));
+        topic.setCoverMedia(requireImage(request.coverMediaId()));
         topic.setStatus(request.status());
         topic.setSortOrder(request.sortOrder());
     }
@@ -140,9 +162,23 @@ public class TopicService {
     }
 
     private void validateExistingArticleIds(List<Long> articleIds) {
-        if (!articleIds.isEmpty() && topicArticleRepository.countExistingArticlesByIds(articleIds) != articleIds.size()) {
+        if (!articleIds.isEmpty() && articleRepository.findAllById(articleIds).size() != articleIds.size()) {
             throw new ResourceNotFoundException("Article", "one or more requested IDs");
         }
+    }
+
+    private static boolean visible(Article article, Instant now) {
+        return article.isVisibleAt(now);
+    }
+
+    private MediaAsset requireImage(Long id) {
+        if (id == null) return null;
+        MediaAsset media = mediaAssetRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Cover media asset", id.toString()));
+        if (media.getContentType() == null || !media.getContentType().toLowerCase(java.util.Locale.ROOT).startsWith("image/")) {
+            throw new IllegalArgumentException("Cover media must be an image");
+        }
+        return media;
     }
 
     private static List<Long> articleIds(List<Long> ids) {

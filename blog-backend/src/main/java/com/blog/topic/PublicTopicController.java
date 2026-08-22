@@ -1,6 +1,7 @@
 package com.blog.topic;
 
 import com.blog.topic.dto.TopicResponse;
+import com.blog.topic.dto.TopicDetailResponse;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -23,7 +24,7 @@ public class PublicTopicController {
     }
 
     @GetMapping("/{slug}")
-    public TopicResponse get(@PathVariable String slug) {
-        return topicService.findPublishedBySlug(slug);
+    public TopicDetailResponse get(@PathVariable String slug) {
+        return topicService.findPublishedDetailBySlug(slug);
     }
 }

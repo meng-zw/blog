@@ -25,7 +25,8 @@ class TaxonomyTopicMySqlIntegrationTest {
                     .isInstanceOf(java.sql.SQLException.class);
             statement.executeUpdate("insert into tag(name, normalized_name, slug) values ('Tag', 'tag', 'tag')");
             statement.executeUpdate("insert into admin_account(username,password_hash,display_name,enabled) values ('admin','x','Admin',1)");
-            statement.executeUpdate("insert into article(title,slug,markdown_content,status,author_id) values ('A','a','x','DRAFT',1)");
+            statement.executeUpdate("insert into article(title,slug,summary,markdown_content,rendered_html,content_type,status) "
+                    + "values ('A','a','Summary','x','<p>x</p>','ARTICLE','DRAFT')");
             statement.executeUpdate("insert into article_tag(article_id,tag_id) values (1,1)");
             assertThatThrownBy(() -> statement.executeUpdate("delete from tag where id=1")).isInstanceOf(java.sql.SQLException.class);
             statement.executeUpdate("insert into topic(name,normalized_name,slug,status,sort_order) values ('T','t','t','PUBLISHED',0)");
