@@ -60,21 +60,24 @@ public class MediaStorageService {
             throw new IllegalArgumentException("Image signature does not match its declared type");
         }
         BufferedImage image = decode(bytes, imageType);
-        if (image.getWidth() > properties.getMaxDimension() || image.getHeight() > properties.getMaxDimension()) {
-            throw new IllegalArgumentException("Image dimensions must not exceed 6000 pixels");
-        }
+        validateDimensions(image.getWidth(), image.getHeight());
 
         String storageKey = UUID.randomUUID() + "." + imageType.extension();
-        writeSafely(storageKey, bytes);
-        MediaAsset asset = new MediaAsset();
-        asset.setStorageKey(storageKey);
-        asset.setOriginalFilename(filename);
-        asset.setContentType(contentType);
-        asset.setByteSize(bytes.length);
-        asset.setWidth(image.getWidth());
-        asset.setHeight(image.getHeight());
-        asset.setCreatedAt(Instant.now());
-        return repository.save(asset);
+        Path destination = writeSafely(storageKey, bytes);
+        try {
+            MediaAsset asset = new MediaAsset();
+            asset.setStorageKey(storageKey);
+            asset.setOriginalFilename(filename);
+            asset.setContentType(contentType);
+            asset.setByteSize(bytes.length);
+            asset.setWidth(image.getWidth());
+            asset.setHeight(image.getHeight());
+            asset.setCreatedAt(Instant.now());
+            return repository.save(asset);
+        } catch (RuntimeException | Error exception) {
+            deleteFinalizedFile(destination);
+            throw exception;
+        }
     }
 
     public Path load(String storageKey) {
@@ -129,8 +132,11 @@ public class MediaStorageService {
         return false;
     }
 
-    private static BufferedImage decode(byte[] bytes, ImageType expectedType) {
+    private BufferedImage decode(byte[] bytes, ImageType expectedType) {
         try (ImageInputStream input = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
+            if (input == null) {
+                throw new IllegalArgumentException("Image cannot be decoded");
+            }
             Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
             if (!readers.hasNext()) {
                 throw new IllegalArgumentException("Image cannot be decoded");
@@ -141,10 +147,14 @@ public class MediaStorageService {
                     throw new IllegalArgumentException("Image format does not match its declared type");
                 }
                 reader.setInput(input, true, true);
+                int declaredWidth = reader.getWidth(0);
+                int declaredHeight = reader.getHeight(0);
+                validateDimensions(declaredWidth, declaredHeight);
                 BufferedImage image = reader.read(0);
                 if (image == null) {
                     throw new IllegalArgumentException("Image cannot be decoded");
                 }
+                validateDimensions(image.getWidth(), image.getHeight());
                 return image;
             } finally {
                 reader.dispose();
@@ -154,7 +164,7 @@ public class MediaStorageService {
         }
     }
 
-    private void writeSafely(String storageKey, byte[] bytes) {
+    private Path writeSafely(String storageKey, byte[] bytes) {
         Path root = storageRoot();
         Path destination = root.resolve(storageKey).normalize();
         if (!destination.startsWith(root)) {
@@ -173,8 +183,23 @@ public class MediaStorageService {
             } finally {
                 Files.deleteIfExists(temporary);
             }
+            return destination;
         } catch (IOException exception) {
             throw new IllegalArgumentException("Unable to store uploaded image", exception);
+        }
+    }
+
+    private void validateDimensions(int width, int height) {
+        if (width <= 0 || height <= 0 || width > properties.getMaxDimension() || height > properties.getMaxDimension()) {
+            throw new IllegalArgumentException("Image dimensions must not exceed 6000 pixels");
+        }
+    }
+
+    private static void deleteFinalizedFile(Path destination) {
+        try {
+            Files.deleteIfExists(destination);
+        } catch (IOException ignored) {
+            // Preserve the persistence exception while making a best-effort cleanup of the finalized media file.
         }
     }
 

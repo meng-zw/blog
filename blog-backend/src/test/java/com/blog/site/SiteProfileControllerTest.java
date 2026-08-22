@@ -98,6 +98,19 @@ class SiteProfileControllerTest {
                 .andExpect(jsonPath("$.errors.githubUrl").exists());
     }
 
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void profileUpdateRejectsLookalikeGithubHost() throws Exception {
+        mockMvc.perform(put("/api/admin/settings")
+                        .contextPath("/api")
+                        .with(csrf())
+                        .contentType("application/json")
+                        .content(validRequest().replace("https://github.com/meng-zw", "https://github.com.evil.example/meng-zw")))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.errors.githubUrl").exists());
+    }
+
     private static String validRequest() {
         return """
                 {"site_title":"小M的思与行","subtitle":"中庸之道","nickname":"小M",
