@@ -773,7 +773,7 @@ git commit -m "feat: add administrator content management"
 - Delete: obsolete `blog-frontend/src/components/Logo.vue`, `SearchBar.vue`, `Icon.vue` when no new route imports them.
 - Modify: `README.md`
 - Create: `docs/migration/legacy-content-migration.md`
-- Create if real content is found: `blog-backend/src/main/resources/db/migration/V7__migrate_legacy_content.sql`
+- Create if real content is found: `blog-backend/src/main/resources/db/migration/V8__migrate_legacy_content.sql`
 - Create: `blog-backend/src/test/java/com/blog/architecture/LegacyDependencyGuardTest.java`
 
 **Interfaces:**
@@ -782,7 +782,7 @@ git commit -m "feat: add administrator content management"
 
 - [ ] **Step 1: Inventory real legacy content before deletion**
 
-Run read-only SQL against the selected source database to count articles, tools, categories, tags and upload references. Record counts and backup commands in `docs/migration/legacy-content-migration.md`. If counts beyond seed/test content are nonzero, create V7 mapping only article/tool/taxonomy/media fields; generate stable slugs; exclude test users, likes, favorites and comments. Require a database and media backup before running V7 outside tests.
+Run read-only SQL against the selected source database to count articles, tools, categories, tags and upload references. Record counts and backup commands in `docs/migration/legacy-content-migration.md`. If counts beyond seed/test content are nonzero, create V8 mapping only article/tool/taxonomy/media fields; generate stable slugs; exclude test users, likes, favorites and comments. Require a database and media backup before running V8 outside tests.
 
 - [ ] **Step 2: Add architecture guard tests**
 
