@@ -12,8 +12,12 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
 
     @Test
     void migratesAnEmptyDatabaseToVersionOne() {
-        var result = Flyway.configure().dataSource(dataSource).load().migrate();
+        var flyway = Flyway.configure().dataSource(dataSource).load();
+        assertThat(flyway.info().current()).isNull();
+
+        var result = flyway.migrate();
         assertThat(result.success).isTrue();
+        assertThat(result.migrationsExecuted).isEqualTo(1);
         assertThat(result.targetSchemaVersion).isEqualTo("1");
     }
 }

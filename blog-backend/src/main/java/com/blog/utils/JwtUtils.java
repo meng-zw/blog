@@ -21,7 +21,7 @@ public class JwtUtils {
     private static final Base64.Encoder URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
     private static final Base64.Decoder URL_DECODER = Base64.getUrlDecoder();
 
-    @Value("${jwt.secret:replace-this-legacy-secret-before-production}")
+    @Value("${jwt.secret:}")
     private String jwtSecret;
 
     @Value("${jwt.expiration:86400000}")
@@ -33,6 +33,7 @@ public class JwtUtils {
      * @return JWT令牌
      */
     public String generateToken(String username) {
+        requireSigningSecret();
         long now = Instant.now().toEpochMilli();
         String header = encode("{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
         String payload = encode("{\"sub\":\"" + escape(username) + "\",\"iat\":" + now
@@ -78,7 +79,7 @@ public class JwtUtils {
     private String sign(String signingInput) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(jwtSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            mac.init(new SecretKeySpec(requireSigningSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
             return URL_ENCODER.encodeToString(mac.doFinal(signingInput.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception exception) {
             throw new IllegalStateException("Unable to sign legacy token", exception);
@@ -95,5 +96,12 @@ public class JwtUtils {
 
     private static String escape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private String requireSigningSecret() {
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalStateException("JWT signing secret must be configured");
+        }
+        return jwtSecret;
     }
 }
