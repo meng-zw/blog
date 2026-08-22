@@ -18,7 +18,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.text.Normalizer;
 import java.util.HashSet;
 import java.util.List;
-import java.util.ArrayList;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.time.Instant;
@@ -31,15 +32,17 @@ public class TopicService {
     private final MediaAssetRepository mediaAssetRepository;
     private final SlugAllocationLockRepository slugAllocationLockRepository;
     private final ArticleRepository articleRepository;
+    private final TopicMembershipManager topicMembershipManager;
 
     public TopicService(TopicRepository topicRepository, TopicArticleRepository topicArticleRepository,
                         MediaAssetRepository mediaAssetRepository, SlugAllocationLockRepository slugAllocationLockRepository,
-                        ArticleRepository articleRepository) {
+                        ArticleRepository articleRepository, TopicMembershipManager topicMembershipManager) {
         this.topicRepository = topicRepository;
         this.topicArticleRepository = topicArticleRepository;
         this.mediaAssetRepository = mediaAssetRepository;
         this.slugAllocationLockRepository = slugAllocationLockRepository;
         this.articleRepository = articleRepository;
+        this.topicMembershipManager = topicMembershipManager;
     }
 
     public List<TopicResponse> listAdmin() {
@@ -80,22 +83,22 @@ public class TopicService {
     @Transactional
     public TopicResponse create(TopicWriteRequest request) {
         slugAllocationLockRepository.lockSingleton();
-        List<Long> articles = articleIds(request.articleIds());
+        List<Article> articles = requireArticles(articleIds(request.articleIds()));
         Topic topic = new Topic();
         apply(topic, request, null);
         Topic saved = topicRepository.save(topic);
-        replaceArticles(saved.getId(), articles);
+        topicMembershipManager.replaceTopic(saved, articles);
         return response(saved);
     }
 
     @Transactional
     public TopicResponse update(long id, TopicWriteRequest request) {
         slugAllocationLockRepository.lockSingleton();
-        List<Long> articles = articleIds(request.articleIds());
+        List<Article> articles = requireArticles(articleIds(request.articleIds()));
         Topic topic = requireTopic(id);
         apply(topic, request, id);
         Topic saved = topicRepository.save(topic);
-        replaceArticles(id, articles);
+        topicMembershipManager.replaceTopic(saved, articles);
         return response(saved);
     }
 
@@ -107,15 +110,14 @@ public class TopicService {
 
     @Transactional
     public void reorderArticles(long topicId, List<Long> requestedArticleIds) {
-        requireTopic(topicId);
+        Topic topic = requireTopic(topicId);
         List<Long> requested = articleIds(requestedArticleIds);
         List<TopicArticle> existing = topicArticleRepository.findByTopicIdOrderBySortOrderAsc(topicId);
         Set<Long> existingIds = existing.stream().map(TopicArticle::getArticleId).collect(java.util.stream.Collectors.toSet());
         if (existingIds.size() != requested.size() || !existingIds.equals(new HashSet<>(requested))) {
             throw new IllegalArgumentException("The complete existing topic article list is required for reorder");
         }
-        validateExistingArticleIds(requested);
-        topicArticleRepository.saveAll(topicArticles(topicId, requested));
+        topicMembershipManager.replaceTopic(topic, requireArticles(requested));
     }
 
     private void apply(Topic topic, TopicWriteRequest request, Long currentId) {
@@ -151,20 +153,14 @@ public class TopicService {
         return base.substring(0, Math.min(base.length(), maximumBaseLength)).replaceAll("-+$", "") + suffixText;
     }
 
-    private void replaceArticles(Long topicId, List<Long> articleIds) {
-        if (articleIds.isEmpty()) {
-            topicArticleRepository.deleteByTopicId(topicId);
-            return;
-        }
-        validateExistingArticleIds(articleIds);
-        topicArticleRepository.deleteByTopicId(topicId);
-        topicArticleRepository.saveAll(topicArticles(topicId, articleIds));
-    }
-
-    private void validateExistingArticleIds(List<Long> articleIds) {
-        if (!articleIds.isEmpty() && articleRepository.findAllById(articleIds).size() != articleIds.size()) {
+    private List<Article> requireArticles(List<Long> articleIds) {
+        if (articleIds.isEmpty()) return List.of();
+        Map<Long, Article> found = new LinkedHashMap<>();
+        articleRepository.findAllById(articleIds).forEach(article -> found.put(article.getId(), article));
+        if (found.size() != articleIds.size()) {
             throw new ResourceNotFoundException("Article", "one or more requested IDs");
         }
+        return articleIds.stream().map(found::get).toList();
     }
 
     private static boolean visible(Article article, Instant now) {
@@ -195,22 +191,6 @@ public class TopicService {
     private Topic requireTopic(long id) {
         return topicRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Topic", Long.toString(id)));
-    }
-
-    private static TopicArticle topicArticle(Long topicId, Long articleId, int sortOrder) {
-        TopicArticle topicArticle = new TopicArticle();
-        topicArticle.setTopicId(topicId);
-        topicArticle.setArticleId(articleId);
-        topicArticle.setSortOrder(sortOrder);
-        return topicArticle;
-    }
-
-    private static List<TopicArticle> topicArticles(Long topicId, List<Long> articleIds) {
-        List<TopicArticle> topicArticles = new ArrayList<>(articleIds.size());
-        for (int position = 0; position < articleIds.size(); position++) {
-            topicArticles.add(topicArticle(topicId, articleIds.get(position), position));
-        }
-        return topicArticles;
     }
 
     private static TopicResponse response(Topic topic) {

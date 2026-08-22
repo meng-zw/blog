@@ -4,13 +4,16 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.QueryHint;
 
 public interface ArticleRepository extends JpaRepository<Article, Long> {
     boolean existsBySlug(String slug);
@@ -21,7 +24,8 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
             + "and (:contentType is null or article.contentType = :contentType) "
             + "and (:categorySlug is null or category.slug = :categorySlug) "
             + "and (:tagSlug is null or tag.slug = :tagSlug) "
-            + "and (:topicSlug is null or topic.slug = :topicSlug) "
+            + "and (:topicSlug is null or (topic.slug = :topicSlug "
+            + "and topic.status = com.blog.topic.TopicStatus.PUBLISHED)) "
             + "and (:keyword is null or lower(article.title) like lower(concat('%', :keyword, '%')) "
             + "or lower(article.summary) like lower(concat('%', :keyword, '%')))")
     Page<Article> findPublicPage(@Param("contentType") ContentType contentType,
@@ -65,9 +69,13 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
             + "and article.publishedAt <= :now order by placement.sortOrder asc, article.id asc")
     List<Article> findVisibleForTopic(@Param("topicId") long topicId, @Param("now") Instant now);
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = "update article set status = 'PUBLISHED', published_at = scheduled_at, scheduled_at = null, "
-            + "updated_at = CURRENT_TIMESTAMP(6) where status = 'SCHEDULED' and scheduled_at <= :now "
-            + "order by scheduled_at asc, id asc limit :batchSize", nativeQuery = true)
-    int publishDue(@Param("now") Instant now, @Param("batchSize") int batchSize);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
+    @EntityGraph(attributePaths = {"topic"})
+    @Query("select article from PublishingArticle article left join article.topic topic "
+            + "where article.status = com.blog.article.ArticleStatus.SCHEDULED "
+            + "and article.scheduledAt <= :now and (article.topic is null "
+            + "or topic.status = com.blog.topic.TopicStatus.PUBLISHED) "
+            + "order by article.scheduledAt asc, article.id asc")
+    List<Article> findDueForPublishing(@Param("now") Instant now, Pageable pageable);
 }

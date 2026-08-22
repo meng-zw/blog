@@ -1,9 +1,9 @@
 package com.blog.article;
 
-import com.blog.article.dto.ArticleSummaryResponse;
 import com.blog.article.dto.ArticleWriteRequest;
 import com.blog.article.dto.ScheduleArticleRequest;
 import com.blog.article.dto.AdminArticleResponse;
+import com.blog.article.dto.AdminArticleSummaryResponse;
 import com.blog.shared.web.PageResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -31,7 +31,7 @@ public class AdminArticleController {
     }
 
     @GetMapping
-    public PageResponse<ArticleSummaryResponse> list(
+    public PageResponse<AdminArticleSummaryResponse> list(
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size,
             @RequestParam(required = false) ArticleStatus status,

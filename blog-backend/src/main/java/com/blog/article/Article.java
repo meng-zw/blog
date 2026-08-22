@@ -30,19 +30,19 @@ public class Article extends AuditedEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false, unique = true, length = 160)
+    @Column(nullable = false, unique = true, length = 255)
     private String slug;
 
-    @Column(nullable = false, length = 200)
+    @Column(nullable = false, length = 255)
     private String title;
 
-    @Column(nullable = false, length = 500)
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String summary;
 
     @Column(name = "markdown_content", nullable = false, columnDefinition = "LONGTEXT")
     private String markdownContent;
 
-    @Column(name = "rendered_html", nullable = false, columnDefinition = "LONGTEXT")
+    @Column(name = "rendered_html", columnDefinition = "LONGTEXT")
     private String renderedHtml;
 
     @Enumerated(EnumType.STRING)

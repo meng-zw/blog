@@ -10,9 +10,9 @@ import org.jsoup.safety.Safelist;
 import org.springframework.stereotype.Component;
 
 import java.text.Normalizer;
-import java.util.HashMap;
 import java.util.Locale;
-import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
 
 @Component
 public class MarkdownRenderer {
@@ -31,8 +31,7 @@ public class MarkdownRenderer {
         if (markdown == null) {
             throw new IllegalArgumentException("Markdown content is required");
         }
-        String withoutDangerousSchemes = markdown.replaceAll("(?i)javascript\\s*:", "");
-        Node documentNode = parser.parse(withoutDangerousSchemes);
+        Node documentNode = parser.parse(markdown);
         String rendered = htmlRenderer.render(documentNode);
         String clean = Jsoup.clean(rendered, "", SAFE_HTML,
                 new Document.OutputSettings().prettyPrint(false));
@@ -44,11 +43,14 @@ public class MarkdownRenderer {
     }
 
     private static void addHeadingIds(Document document) {
-        Map<String, Integer> occurrences = new HashMap<>();
+        Set<String> usedIds = new HashSet<>();
         for (Element heading : document.select("h1, h2, h3, h4, h5, h6")) {
             String base = headingSlug(heading.text());
-            int occurrence = occurrences.merge(base, 1, Integer::sum);
-            heading.attr("id", occurrence == 1 ? base : base + "-" + occurrence);
+            String candidate = base;
+            for (int suffix = 2; !usedIds.add(candidate); suffix++) {
+                candidate = base + "-" + suffix;
+            }
+            heading.attr("id", candidate);
         }
     }
 

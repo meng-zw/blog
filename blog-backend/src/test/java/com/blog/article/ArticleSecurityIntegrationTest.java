@@ -1,6 +1,11 @@
 package com.blog.article;
 
 import com.blog.article.dto.ArticleDetailResponse;
+import com.blog.article.dto.ArticleSummaryResponse;
+import com.blog.article.dto.PublicCategoryResponse;
+import com.blog.article.dto.PublicTagResponse;
+import com.blog.article.dto.PublicTopicResponse;
+import com.blog.shared.web.PageResponse;
 import com.blog.config.SecurityConfig;
 import com.blog.identity.AdminAccountRepository;
 import com.blog.identity.AdminUserDetailsService;
@@ -22,6 +27,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -43,12 +49,38 @@ class ArticleSecurityIntegrationTest {
     void publicPublishedDetailIsAnonymousAndReturnsOnlyTrustedRenderedHtml() throws Exception {
         when(articleService.findPublishedBySlug("safe-post")).thenReturn(new ArticleDetailResponse(
                 1L, "safe-post", "Safe", "Summary", ContentType.ARTICLE, Instant.parse("2026-08-22T10:00:00Z"),
-                null, null, List.of(), null, "<h2 id=\"safe\">Safe</h2>", "SEO", "Description", null, null));
+                null, new PublicCategoryResponse(2L, "Java", "java"),
+                List.of(new PublicTagResponse(3L, "Spring", "spring")),
+                new PublicTopicResponse(4L, "Series", "series"),
+                "<h2 id=\"safe\">Safe</h2>", "SEO", "Description", null, null));
 
         mockMvc.perform(get("/api/public/articles/safe-post").contextPath("/api"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.rendered_html").value("<h2 id=\"safe\">Safe</h2>"))
-                .andExpect(jsonPath("$.markdown_content").doesNotExist());
+                .andExpect(jsonPath("$.markdown_content").doesNotExist())
+                .andExpect(jsonPath("$.status").doesNotExist())
+                .andExpect(jsonPath("$.scheduled_at").doesNotExist())
+                .andExpect(jsonPath("$.category.sort_order").doesNotExist())
+                .andExpect(jsonPath("$.category.scope").doesNotExist())
+                .andExpect(jsonPath("$.topic.status").doesNotExist())
+                .andExpect(jsonPath("$.topic.sort_order").doesNotExist());
+    }
+
+    @Test
+    void publicSummaryDoesNotExposeWorkflowOrInternalTaxonomyFields() throws Exception {
+        ArticleSummaryResponse summary = new ArticleSummaryResponse(1L, "safe-post", "Safe", "Summary",
+                ContentType.ARTICLE, Instant.parse("2026-08-22T10:00:00Z"), null,
+                new PublicCategoryResponse(2L, "Java", "java"),
+                List.of(new PublicTagResponse(3L, "Spring", "spring")));
+        when(articleService.listPublic(0, 20, null, null, null, null, null))
+                .thenReturn(new PageResponse<>(List.of(summary), 0, 20, 1, 1));
+
+        mockMvc.perform(get("/api/public/articles").contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].status").doesNotExist())
+                .andExpect(jsonPath("$.items[0].scheduled_at").doesNotExist())
+                .andExpect(jsonPath("$.items[0].category.sort_order").doesNotExist())
+                .andExpect(jsonPath("$.items[0].category.scope").doesNotExist());
     }
 
     @Test
@@ -90,6 +122,22 @@ class ArticleSecurityIntegrationTest {
                         .content("{\"title\":\"Title\",\"slug\":\"\",\"summary\":\"Summary\","
                                 + "\"markdown_content\":\"Body\",\"content_type\":\"ARTICLE\",\"tag_ids\":[]}"))
                 .andExpect(status().isCreated());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void postNormalizationBoundFailureReturnsProblemDetailsBadRequest() throws Exception {
+        when(articleService.createDraft(any())).thenThrow(
+                new IllegalArgumentException("Title is too long after normalization"));
+        String expandedTitle = "\ufdfa".repeat(12);
+
+        mockMvc.perform(post("/api/admin/articles").contextPath("/api").with(csrf())
+                        .contentType("application/json")
+                        .content("{\"title\":\"" + expandedTitle + "\",\"summary\":\"Summary\","
+                                + "\"markdown_content\":\"Body\",\"content_type\":\"ARTICLE\",\"tag_ids\":[]}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.detail").value("Title is too long after normalization"));
     }
 
     private static String validRequest() {

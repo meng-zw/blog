@@ -12,8 +12,12 @@ import com.blog.taxonomy.TaxonomyService;
 import com.blog.topic.Topic;
 import com.blog.topic.TopicRepository;
 import com.blog.topic.TopicStatus;
+import com.blog.topic.TopicMembershipManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -25,6 +29,7 @@ import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.Set;
 import java.util.List;
+import java.util.stream.Stream;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 
@@ -47,13 +52,14 @@ class ArticleServiceTest {
     @Mock MediaAssetRepository mediaAssetRepository;
     @Mock TopicRepository topicRepository;
     @Mock SlugAllocationLockRepository slugAllocationLockRepository;
+    @Mock TopicMembershipManager topicMembershipManager;
     private ArticleService articleService;
 
     @BeforeEach
     void setUp() {
         articleService = new ArticleService(articleRepository, markdownRenderer, taxonomyService,
                 mediaAssetRepository, topicRepository, slugAllocationLockRepository,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                topicMembershipManager, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -82,6 +88,7 @@ class ArticleServiceTest {
         ordered.verify(articleRepository).existsBySlug("a-java-note");
         ArgumentCaptor<Article> saved = ArgumentCaptor.forClass(Article.class);
         verify(articleRepository).save(saved.capture());
+        verify(topicMembershipManager).synchronizeArticle(saved.getValue());
         assertThat(saved.getValue().getStatus()).isEqualTo(ArticleStatus.DRAFT);
         assertThat(saved.getValue().getRenderedHtml()).isEqualTo("<h1 id=\"body\">body</h1>");
         assertThat(saved.getValue().getCategory()).isSameAs(category);
@@ -102,6 +109,25 @@ class ArticleServiceTest {
     }
 
     @Test
+    void createDraftRejectsMissingCoverMediaBeforeSaving() {
+        when(mediaAssetRepository.findById(404L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> articleService.createDraft(
+                request("Title", "body", 404L, null, null, Set.of())))
+                .isInstanceOf(com.blog.shared.error.ResourceNotFoundException.class);
+        verify(articleRepository, never()).save(any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("normalizedExpansionRequests")
+    void compatibilityExpansionBeyondApprovedBoundsIsRejectedBeforeAnyRepositoryCall(ArticleWriteRequest request) {
+        assertThatIllegalArgumentException().isThrownBy(() -> articleService.createDraft(request));
+
+        verify(slugAllocationLockRepository, never()).lockSingleton();
+        verify(articleRepository, never()).save(any());
+    }
+
+    @Test
     void updateDoesNotRenderWhenMarkdownHasNotChanged() {
         Article article = article(2L, ArticleStatus.DRAFT, ContentType.ARTICLE);
         article.setMarkdownContent("same markdown");
@@ -112,6 +138,7 @@ class ArticleServiceTest {
         articleService.update(2L, request("Changed title", "same markdown", null, null, null, Set.of()));
 
         verify(markdownRenderer, never()).render(any());
+        verify(topicMembershipManager).synchronizeArticle(article);
         assertThat(article.getRenderedHtml()).isEqualTo("<p>trusted</p>");
     }
 
@@ -144,10 +171,17 @@ class ArticleServiceTest {
 
     @Test
     void publishDueUsesOneBoundedConditionalUpdateAndIsIdempotent() {
-        when(articleRepository.publishDue(NOW, 100)).thenReturn(2, 0);
+        Article first = article(1L, ArticleStatus.SCHEDULED, ContentType.ARTICLE);
+        first.setScheduledAt(NOW.minusSeconds(2));
+        Article second = article(2L, ArticleStatus.SCHEDULED, ContentType.NOTE);
+        second.setScheduledAt(NOW.minusSeconds(1));
+        when(articleRepository.findDueForPublishing(eq(NOW), any(Pageable.class)))
+                .thenReturn(List.of(first, second), List.of());
 
         assertThat(articleService.publishDue(NOW)).isEqualTo(2);
         assertThat(articleService.publishDue(NOW)).isZero();
+        assertThat(first.getStatus()).isEqualTo(ArticleStatus.PUBLISHED);
+        assertThat(second.getStatus()).isEqualTo(ArticleStatus.PUBLISHED);
     }
 
     @Test
@@ -156,6 +190,54 @@ class ArticleServiceTest {
         when(articleRepository.findById(2L)).thenReturn(Optional.of(archived));
 
         assertThatThrownBy(() -> articleService.publishNow(2L)).isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    void publishingRejectsArticleAssignedToDraftTopic() {
+        Article draft = article(2L, ArticleStatus.DRAFT, ContentType.ARTICLE);
+        draft.setTopic(topic(9L, TopicStatus.DRAFT));
+        when(articleRepository.findById(2L)).thenReturn(Optional.of(draft));
+
+        assertThatThrownBy(() -> articleService.publishNow(2L)).isInstanceOf(ConflictException.class);
+        verify(articleRepository, never()).save(any());
+    }
+
+    @Test
+    void schedulingRejectsArticleAssignedToDraftTopic() {
+        Article draft = article(2L, ArticleStatus.DRAFT, ContentType.ARTICLE);
+        draft.setTopic(topic(9L, TopicStatus.DRAFT));
+        when(articleRepository.findById(2L)).thenReturn(Optional.of(draft));
+
+        assertThatThrownBy(() -> articleService.schedule(2L, NOW.plusSeconds(60)))
+                .isInstanceOf(ConflictException.class);
+        verify(articleRepository, never()).save(any());
+    }
+
+    @Test
+    void duePublishingDefensivelySkipsArticleWhoseTopicBecameDraft() {
+        Article scheduled = article(2L, ArticleStatus.SCHEDULED, ContentType.ARTICLE);
+        scheduled.setScheduledAt(NOW.minusSeconds(1));
+        scheduled.setTopic(topic(9L, TopicStatus.DRAFT));
+        when(articleRepository.findDueForPublishing(eq(NOW), any(Pageable.class)))
+                .thenReturn(List.of(scheduled));
+
+        assertThat(articleService.publishDue(NOW)).isZero();
+        assertThat(scheduled.getStatus()).isEqualTo(ArticleStatus.SCHEDULED);
+        verify(articleRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void publicDetailOmitsDraftTopicDefensively() {
+        Article published = article(2L, ArticleStatus.PUBLISHED, ContentType.ARTICLE);
+        published.setPublishedAt(NOW.minusSeconds(1));
+        published.setTopic(topic(9L, TopicStatus.DRAFT));
+        when(articleRepository.findPublishedBySlug("article-2", NOW)).thenReturn(Optional.of(published));
+        when(articleRepository.findPreviousVisible(eq(ContentType.ARTICLE), any(), eq(2L), eq(NOW), any()))
+                .thenReturn(List.of());
+        when(articleRepository.findNextVisible(eq(ContentType.ARTICLE), any(), eq(2L), eq(NOW), any()))
+                .thenReturn(List.of());
+
+        assertThat(articleService.findPublishedBySlug("article-2").topic()).isNull();
     }
 
     @Test
@@ -257,6 +339,22 @@ class ArticleServiceTest {
                                                 Long topicId, Set<Long> tagIds) {
         return new ArticleWriteRequest(title, null, "Summary", markdown, ContentType.ARTICLE,
                 coverId, categoryId, topicId, tagIds, "SEO", "SEO description");
+    }
+
+    private static Stream<Arguments> normalizedExpansionRequests() {
+        String expansion = "\ufdfa";
+        return Stream.of(
+                Arguments.of(new ArticleWriteRequest(expansion.repeat(12), null, "Summary", "body",
+                        ContentType.ARTICLE, null, null, null, Set.of(), null, null)),
+                Arguments.of(new ArticleWriteRequest("Title", null, expansion.repeat(28), "body",
+                        ContentType.ARTICLE, null, null, null, Set.of(), null, null)),
+                Arguments.of(new ArticleWriteRequest("Title", expansion.repeat(9), "Summary", "body",
+                        ContentType.ARTICLE, null, null, null, Set.of(), null, null)),
+                Arguments.of(new ArticleWriteRequest("Title", null, "Summary", "body",
+                        ContentType.ARTICLE, null, null, null, Set.of(), expansion.repeat(4), null)),
+                Arguments.of(new ArticleWriteRequest("Title", null, "Summary", "body",
+                        ContentType.ARTICLE, null, null, null, Set.of(), null, expansion.repeat(9)))
+        );
     }
 
     private static Article article(Long id, ArticleStatus status, ContentType type) {

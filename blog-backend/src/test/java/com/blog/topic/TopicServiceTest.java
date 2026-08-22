@@ -41,12 +41,15 @@ class TopicServiceTest {
     private SlugAllocationLockRepository slugAllocationLockRepository;
     @Mock
     private ArticleRepository articleRepository;
+    @Mock
+    private TopicMembershipManager topicMembershipManager;
     @InjectMocks
     private TopicService topicService;
 
     @Test
     void reorderStoresTheRequestedArticleOrderAsContiguousPositions() {
-        when(topicRepository.findById(3L)).thenReturn(Optional.of(topic(3L)));
+        Topic topic = topic(3L);
+        when(topicRepository.findById(3L)).thenReturn(Optional.of(topic));
         when(topicArticleRepository.findByTopicIdOrderBySortOrderAsc(3L)).thenReturn(List.of(
                 topicArticle(3L, 22L, 0), topicArticle(3L, 11L, 1)));
         when(articleRepository.findAllById(List.of(11L, 22L))).thenReturn(List.of(
@@ -54,10 +57,9 @@ class TopicServiceTest {
 
         topicService.reorderArticles(3L, List.of(11L, 22L));
 
-        ArgumentCaptor<List<TopicArticle>> saved = ArgumentCaptor.forClass(List.class);
-        verify(topicArticleRepository).saveAll(saved.capture());
-        assertThat(saved.getValue()).extracting(TopicArticle::getArticleId).containsExactly(11L, 22L);
-        assertThat(saved.getValue()).extracting(TopicArticle::getSortOrder).containsExactly(0, 1);
+        ArgumentCaptor<List<Article>> saved = ArgumentCaptor.forClass(List.class);
+        verify(topicMembershipManager).replaceTopic(eq(topic), saved.capture());
+        assertThat(saved.getValue()).extracting(Article::getId).containsExactly(11L, 22L);
     }
 
     @Test
@@ -67,7 +69,7 @@ class TopicServiceTest {
                 topicArticle(3L, 11L, 0), topicArticle(3L, 22L, 1)));
 
         assertThatIllegalArgumentException().isThrownBy(() -> topicService.reorderArticles(3L, List.of(11L)));
-        verify(topicArticleRepository, never()).saveAll(any());
+        verify(topicMembershipManager, never()).replaceTopic(any(), any());
     }
 
     @Test
@@ -75,7 +77,7 @@ class TopicServiceTest {
         when(topicRepository.findById(3L)).thenReturn(Optional.of(topic(3L)));
 
         assertThatIllegalArgumentException().isThrownBy(() -> topicService.reorderArticles(3L, List.of(11L, 11L)));
-        verify(topicArticleRepository, never()).saveAll(any());
+        verify(topicMembershipManager, never()).replaceTopic(any(), any());
     }
 
     @Test
@@ -95,7 +97,7 @@ class TopicServiceTest {
         var order = inOrder(slugAllocationLockRepository, topicRepository);
         order.verify(slugAllocationLockRepository).lockSingleton();
         order.verify(topicRepository).findByNormalizedName("java");
-        verify(topicArticleRepository).saveAll(any());
+        verify(topicMembershipManager).replaceTopic(any(Topic.class), any());
     }
 
     @Test
@@ -106,14 +108,11 @@ class TopicServiceTest {
         when(topicRepository.findByNormalizedName("java")).thenReturn(Optional.of(existing));
         when(topicRepository.save(existing)).thenReturn(existing);
         topicService.update(3L, new TopicWriteRequest("Java", null, null, TopicStatus.DRAFT, List.of(), 0));
-        verify(topicArticleRepository).deleteByTopicId(3L);
+        verify(topicMembershipManager).replaceTopic(existing, List.of());
     }
 
     @Test
     void createRejectsUnknownArticleIdsBeforeAssociationMutation() {
-        when(topicRepository.findByNormalizedName("java")).thenReturn(Optional.empty());
-        when(topicRepository.existsBySlug("java")).thenReturn(false);
-        when(topicRepository.save(any(Topic.class))).thenAnswer(i -> { Topic value = i.getArgument(0); value.setId(3L); return value; });
         when(articleRepository.findAllById(List.of(99L))).thenReturn(List.of());
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> topicService.create(
                 new TopicWriteRequest("Java", null, null, TopicStatus.DRAFT, List.of(99L), 0)))
@@ -144,10 +143,9 @@ class TopicServiceTest {
         topicService.update(3L, new TopicWriteRequest("Java", null, null, TopicStatus.PUBLISHED,
                 List.of(22L, 11L), 0));
 
-        ArgumentCaptor<List<TopicArticle>> saved = ArgumentCaptor.forClass(List.class);
-        verify(topicArticleRepository).saveAll(saved.capture());
-        assertThat(saved.getValue()).extracting(TopicArticle::getArticleId).containsExactly(22L, 11L);
-        assertThat(saved.getValue()).extracting(TopicArticle::getSortOrder).containsExactly(0, 1);
+        ArgumentCaptor<List<Article>> saved = ArgumentCaptor.forClass(List.class);
+        verify(topicMembershipManager).replaceTopic(eq(existing), saved.capture());
+        assertThat(saved.getValue()).extracting(Article::getId).containsExactly(22L, 11L);
     }
 
     @Test

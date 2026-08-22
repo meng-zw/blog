@@ -23,13 +23,35 @@ class MarkdownRendererTest {
     }
 
     @Test
+    void headingIdsRemainGloballyUniqueWhenNaturalTextContainsGeneratedSuffix() {
+        String html = renderer.render("## Foo\n\n## Foo\n\n## Foo-2");
+
+        assertThat(html).contains("id=\"foo\"", "id=\"foo-2\"", "id=\"foo-2-2\"");
+    }
+
+    @Test
     void removesScriptsEventHandlersJavascriptUrlsAndIframes() {
         String html = renderer.render("<script>alert(1)</script>\n"
                 + "<img src=\"https://example.com/a.png\" onerror=\"alert(2)\">\n"
                 + "[bad](javascript:evil)\n"
                 + "<iframe src=\"https://evil.example\"></iframe>");
 
-        assertThat(html).doesNotContain("<script", "onerror", "javascript:", "<iframe", "evil.example");
+        assertThat(html).doesNotContain("<script", "onerror", "href=\"javascript:", "<iframe", "evil.example");
+    }
+
+    @Test
+    void sanitizerRejectsEncodedAndObfuscatedDangerousHrefAttributes() {
+        String html = renderer.render("<a href=\"java&#x73;cript:alert(1)\">encoded</a>\n"
+                + "<a href=\"JaVaScRiPt:evil\">mixed</a>");
+
+        assertThat(html).contains("encoded", "mixed").doesNotContain("href=");
+    }
+
+    @Test
+    void preservesJavascriptTextInOrdinaryProseAndFencedCode() {
+        String html = renderer.render("The `javascript:` label is ordinary prose.\n\n```java\nString scheme = \"javascript:\";\n```");
+
+        assertThat(html).contains("javascript:", "String scheme = \"javascript:\";");
     }
 
     @Test

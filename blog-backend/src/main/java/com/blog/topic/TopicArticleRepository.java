@@ -6,14 +6,18 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface TopicArticleRepository extends JpaRepository<TopicArticle, TopicArticle.Id> {
     List<TopicArticle> findByTopicIdOrderBySortOrderAsc(long topicId);
+    Optional<TopicArticle> findByArticleId(long articleId);
 
-    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Modifying(flushAutomatically = true)
     @Query("delete from TopicArticle article where article.topicId = :topicId")
     void deleteByTopicId(@Param("topicId") long topicId);
 
-    @Query(value = "select count(*) from article where id in (:articleIds)", nativeQuery = true)
-    long countExistingArticlesByIds(@Param("articleIds") List<Long> articleIds);
+    @Modifying(flushAutomatically = true)
+    @Query("delete from TopicArticle article where article.articleId = :articleId")
+    void deleteByArticleId(@Param("articleId") long articleId);
+
 }

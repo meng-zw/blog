@@ -4,6 +4,10 @@ import com.blog.article.dto.ArticleDetailResponse;
 import com.blog.article.dto.ArticleSummaryResponse;
 import com.blog.article.dto.ArticleWriteRequest;
 import com.blog.article.dto.AdminArticleResponse;
+import com.blog.article.dto.AdminArticleSummaryResponse;
+import com.blog.article.dto.PublicCategoryResponse;
+import com.blog.article.dto.PublicTagResponse;
+import com.blog.article.dto.PublicTopicResponse;
 import com.blog.media.MediaAsset;
 import com.blog.media.MediaAssetRepository;
 import com.blog.shared.error.ConflictException;
@@ -18,6 +22,7 @@ import com.blog.taxonomy.dto.CategoryResponse;
 import com.blog.taxonomy.dto.TagResponse;
 import com.blog.topic.Topic;
 import com.blog.topic.TopicRepository;
+import com.blog.topic.TopicMembershipManager;
 import com.blog.topic.dto.TopicResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
@@ -33,11 +38,13 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 @Service
 @Transactional(readOnly = true)
 public class ArticleService {
     private static final int PUBLISH_BATCH_SIZE = 100;
+    private static final Pattern EXPLICIT_SLUG = Pattern.compile("[a-z0-9]+(?:-[a-z0-9]+)*");
 
     private final ArticleRepository articleRepository;
     private final MarkdownRenderer markdownRenderer;
@@ -45,55 +52,65 @@ public class ArticleService {
     private final MediaAssetRepository mediaAssetRepository;
     private final TopicRepository topicRepository;
     private final SlugAllocationLockRepository slugAllocationLockRepository;
+    private final TopicMembershipManager topicMembershipManager;
     private final Clock clock;
 
     @Autowired
     public ArticleService(ArticleRepository articleRepository, MarkdownRenderer markdownRenderer,
                           TaxonomyService taxonomyService, MediaAssetRepository mediaAssetRepository,
-                          TopicRepository topicRepository, SlugAllocationLockRepository slugAllocationLockRepository) {
+                          TopicRepository topicRepository, SlugAllocationLockRepository slugAllocationLockRepository,
+                          TopicMembershipManager topicMembershipManager) {
         this(articleRepository, markdownRenderer, taxonomyService, mediaAssetRepository, topicRepository,
-                slugAllocationLockRepository, Clock.systemUTC());
+                slugAllocationLockRepository, topicMembershipManager, Clock.systemUTC());
     }
 
     ArticleService(ArticleRepository articleRepository, MarkdownRenderer markdownRenderer,
                    TaxonomyService taxonomyService, MediaAssetRepository mediaAssetRepository,
                    TopicRepository topicRepository, SlugAllocationLockRepository slugAllocationLockRepository,
-                   Clock clock) {
+                   TopicMembershipManager topicMembershipManager, Clock clock) {
         this.articleRepository = articleRepository;
         this.markdownRenderer = markdownRenderer;
         this.taxonomyService = taxonomyService;
         this.mediaAssetRepository = mediaAssetRepository;
         this.topicRepository = topicRepository;
         this.slugAllocationLockRepository = slugAllocationLockRepository;
+        this.topicMembershipManager = topicMembershipManager;
         this.clock = clock;
     }
 
     @Transactional
     public AdminArticleResponse createDraft(ArticleWriteRequest request) {
+        NormalizedInput input = normalizeInput(request);
         slugAllocationLockRepository.lockSingleton();
         Article article = new Article();
-        article.setSlug(allocateCreateSlug(request));
+        article.setSlug(allocateCreateSlug(input));
         article.setStatus(ArticleStatus.DRAFT);
-        apply(article, request, true);
-        return adminDetail(articleRepository.save(article));
+        apply(article, request, input, true);
+        Article saved = articleRepository.save(article);
+        topicMembershipManager.synchronizeArticle(saved);
+        return adminDetail(saved);
     }
 
     @Transactional
     public AdminArticleResponse update(long id, ArticleWriteRequest request) {
+        NormalizedInput input = normalizeInput(request);
         slugAllocationLockRepository.lockSingleton();
         Article article = requireArticle(id);
         if (article.getStatus() == ArticleStatus.ARCHIVED) {
             throw new ConflictException("Archived content cannot be edited");
         }
-        updateExplicitSlug(article, request.slug());
-        apply(article, request, !request.markdownContent().equals(article.getMarkdownContent()));
-        return adminDetail(articleRepository.save(article));
+        updateExplicitSlug(article, input.slug());
+        apply(article, request, input, !request.markdownContent().equals(article.getMarkdownContent()));
+        Article saved = articleRepository.save(article);
+        topicMembershipManager.synchronizeArticle(saved);
+        return adminDetail(saved);
     }
 
     @Transactional
     public AdminArticleResponse publishNow(long id) {
         Article article = requireArticle(id);
         requireState(article, ArticleStatus.DRAFT, ArticleStatus.SCHEDULED);
+        requirePublishableTopic(article);
         article.setStatus(ArticleStatus.PUBLISHED);
         article.setPublishedAt(clock.instant());
         article.setScheduledAt(null);
@@ -107,6 +124,7 @@ public class ArticleService {
         }
         Article article = requireArticle(id);
         requireState(article, ArticleStatus.DRAFT, ArticleStatus.SCHEDULED);
+        requirePublishableTopic(article);
         article.setStatus(ArticleStatus.SCHEDULED);
         article.setScheduledAt(scheduledAt);
         article.setPublishedAt(null);
@@ -127,7 +145,20 @@ public class ArticleService {
         if (now == null) {
             throw new IllegalArgumentException("Publication time is required");
         }
-        return articleRepository.publishDue(now, PUBLISH_BATCH_SIZE);
+        List<Article> due = articleRepository.findDueForPublishing(now, PageRequest.of(0, PUBLISH_BATCH_SIZE));
+        List<Article> publishable = due.stream().filter(article -> article.getStatus() == ArticleStatus.SCHEDULED)
+                .filter(article -> article.getScheduledAt() != null && !article.getScheduledAt().isAfter(now))
+                .filter(ArticleService::hasPublishableTopic)
+                .toList();
+        for (Article article : publishable) {
+            article.setStatus(ArticleStatus.PUBLISHED);
+            article.setPublishedAt(article.getScheduledAt());
+            article.setScheduledAt(null);
+        }
+        if (!publishable.isEmpty()) {
+            articleRepository.saveAll(publishable);
+        }
+        return publishable.size();
     }
 
     public PageResponse<ArticleSummaryResponse> listPublic(int page, int size, ContentType contentType,
@@ -141,12 +172,12 @@ public class ArticleService {
         return PageResponse.from(result);
     }
 
-    public PageResponse<ArticleSummaryResponse> listAdmin(int page, int size, ArticleStatus status,
-                                                          ContentType contentType) {
+    public PageResponse<AdminArticleSummaryResponse> listAdmin(int page, int size, ArticleStatus status,
+                                                               ContentType contentType) {
         PageRequest pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Order.desc("updatedAt"), Sort.Order.desc("id")));
         return PageResponse.from(articleRepository.findAdminPage(status, contentType, pageable)
-                .map(ArticleService::summary));
+                .map(ArticleService::adminSummary));
     }
 
     public AdminArticleResponse findAdmin(long id) {
@@ -164,9 +195,9 @@ public class ArticleService {
         return detail(article, previous, next);
     }
 
-    private void apply(Article article, ArticleWriteRequest request, boolean renderMarkdown) {
-        article.setTitle(normalizeRequired(request.title(), "Title"));
-        article.setSummary(normalizeRequired(request.summary(), "Summary"));
+    private void apply(Article article, ArticleWriteRequest request, NormalizedInput input, boolean renderMarkdown) {
+        article.setTitle(input.title());
+        article.setSummary(input.summary());
         if (renderMarkdown) {
             article.setRenderedHtml(markdownRenderer.render(request.markdownContent()));
         }
@@ -178,8 +209,8 @@ public class ArticleService {
         article.setTopic(request.topicId() == null ? null : topicRepository.findById(request.topicId())
                 .orElseThrow(() -> new ResourceNotFoundException("Topic", request.topicId().toString())));
         article.setTags(taxonomyService.requireTags(request.tagIds()));
-        article.setSeoTitle(normalizeOptional(request.seoTitle()));
-        article.setSeoDescription(normalizeOptional(request.seoDescription()));
+        article.setSeoTitle(input.seoTitle());
+        article.setSeoDescription(input.seoDescription());
     }
 
     private MediaAsset requireImage(Long id) {
@@ -194,14 +225,14 @@ public class ArticleService {
         return media;
     }
 
-    private String allocateCreateSlug(ArticleWriteRequest request) {
-        if (request.slug() != null && !request.slug().isBlank()) {
-            if (articleRepository.existsBySlug(request.slug())) {
+    private String allocateCreateSlug(NormalizedInput input) {
+        if (input.slug() != null) {
+            if (articleRepository.existsBySlug(input.slug())) {
                 throw new ConflictException("An article with this slug already exists");
             }
-            return request.slug();
+            return input.slug();
         }
-        String base = TaxonomyService.slugBase(request.title(), "article");
+        String base = TaxonomyService.slugBase(input.title(), "article");
         for (int suffix = 1; ; suffix++) {
             String candidate = suffix == 1 ? base : suffixed(base, suffix);
             if (!articleRepository.existsBySlug(candidate)) {
@@ -241,22 +272,31 @@ public class ArticleService {
         throw new ConflictException("Illegal article state transition from " + article.getStatus());
     }
 
+    private static void requirePublishableTopic(Article article) {
+        if (!hasPublishableTopic(article)) {
+            throw new ConflictException("Article topic must be published before publication can be scheduled");
+        }
+    }
+
+    private static boolean hasPublishableTopic(Article article) {
+        return article.getTopic() == null || article.getTopic().getStatus() == com.blog.topic.TopicStatus.PUBLISHED;
+    }
+
     private static ArticleSummaryResponse first(List<Article> articles) {
         return articles.isEmpty() ? null : summary(articles.getFirst());
     }
 
     public static ArticleSummaryResponse summary(Article article) {
         return new ArticleSummaryResponse(article.getId(), article.getSlug(), article.getTitle(), article.getSummary(),
-                article.getContentType(), article.getStatus(), article.getPublishedAt(), article.getScheduledAt(),
-                mediaUrl(article.getCoverMedia()),
-                category(article.getCategory()), tags(article.getTags()));
+                article.getContentType(), article.getPublishedAt(), mediaUrl(article.getCoverMedia()),
+                publicCategory(article.getCategory()), publicTags(article.getTags()));
     }
 
     private static ArticleDetailResponse detail(Article article, ArticleSummaryResponse previous,
                                                 ArticleSummaryResponse next) {
         return new ArticleDetailResponse(article.getId(), article.getSlug(), article.getTitle(), article.getSummary(),
                 article.getContentType(), article.getPublishedAt(), mediaUrl(article.getCoverMedia()),
-                category(article.getCategory()), tags(article.getTags()), topic(article.getTopic()),
+                publicCategory(article.getCategory()), publicTags(article.getTags()), publicTopic(article.getTopic()),
                 article.getRenderedHtml(), article.getSeoTitle(), article.getSeoDescription(), previous, next);
     }
 
@@ -266,6 +306,13 @@ public class ArticleService {
                 article.getPublishedAt(), article.getScheduledAt(), mediaUrl(article.getCoverMedia()),
                 category(article.getCategory()), tags(article.getTags()), topic(article.getTopic()),
                 article.getSeoTitle(), article.getSeoDescription());
+    }
+
+    private static AdminArticleSummaryResponse adminSummary(Article article) {
+        return new AdminArticleSummaryResponse(article.getId(), article.getSlug(), article.getTitle(),
+                article.getSummary(), article.getContentType(), article.getStatus(), article.getPublishedAt(),
+                article.getScheduledAt(), mediaUrl(article.getCoverMedia()), category(article.getCategory()),
+                tags(article.getTags()));
     }
 
     private static CategoryResponse category(Category category) {
@@ -286,6 +333,21 @@ public class ArticleService {
                 topic.getDescription(), mediaUrl(topic.getCoverMedia()), topic.getStatus(), topic.getSortOrder());
     }
 
+    private static PublicCategoryResponse publicCategory(Category category) {
+        return category == null ? null : new PublicCategoryResponse(category.getId(), category.getName(), category.getSlug());
+    }
+
+    private static List<PublicTagResponse> publicTags(Set<Tag> tags) {
+        if (tags == null) return List.of();
+        return tags.stream().sorted(Comparator.comparing(Tag::getName).thenComparing(Tag::getId))
+                .map(tag -> new PublicTagResponse(tag.getId(), tag.getName(), tag.getSlug())).toList();
+    }
+
+    private static PublicTopicResponse publicTopic(Topic topic) {
+        return topic == null || topic.getStatus() != com.blog.topic.TopicStatus.PUBLISHED ? null
+                : new PublicTopicResponse(topic.getId(), topic.getName(), topic.getSlug());
+    }
+
     private static String mediaUrl(MediaAsset media) {
         return media == null ? null : "/api/media/" + media.getStorageKey();
     }
@@ -298,6 +360,30 @@ public class ArticleService {
         return normalized;
     }
 
+    private static NormalizedInput normalizeInput(ArticleWriteRequest request) {
+        if (request == null) throw new IllegalArgumentException("Article request is required");
+        String title = bounded(normalizeRequired(request.title(), "Title"), 200, "Title");
+        String summary = bounded(normalizeRequired(request.summary(), "Summary"), 500, "Summary");
+        String slug = normalizeOptional(request.slug());
+        if (slug != null && slug.isBlank()) slug = null;
+        if (slug != null) {
+            bounded(slug, 160, "Slug");
+            if (!EXPLICIT_SLUG.matcher(slug).matches()) {
+                throw new IllegalArgumentException("Slug must be lowercase URL-safe text");
+            }
+        }
+        String seoTitle = bounded(normalizeOptional(request.seoTitle()), 70, "SEO title");
+        String seoDescription = bounded(normalizeOptional(request.seoDescription()), 160, "SEO description");
+        return new NormalizedInput(title, slug, summary, seoTitle, seoDescription);
+    }
+
+    private static String bounded(String value, int maximum, String field) {
+        if (value != null && value.length() > maximum) {
+            throw new IllegalArgumentException(field + " is too long after normalization");
+        }
+        return value;
+    }
+
     private static String normalizeOptional(String value) {
         return value == null ? null : Normalizer.normalize(value, Normalizer.Form.NFKC).trim();
     }
@@ -306,5 +392,9 @@ public class ArticleService {
         if (value == null) return null;
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private record NormalizedInput(String title, String slug, String summary,
+                                   String seoTitle, String seoDescription) {
     }
 }
