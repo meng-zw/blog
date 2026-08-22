@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.text.Normalizer;
+import com.ibm.icu.lang.UCharacter;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -24,10 +25,13 @@ public class TaxonomyService {
 
     private final CategoryRepository categoryRepository;
     private final TagRepository tagRepository;
+    private final SlugAllocationLockRepository slugAllocationLockRepository;
 
-    public TaxonomyService(CategoryRepository categoryRepository, TagRepository tagRepository) {
+    public TaxonomyService(CategoryRepository categoryRepository, TagRepository tagRepository,
+                           SlugAllocationLockRepository slugAllocationLockRepository) {
         this.categoryRepository = categoryRepository;
         this.tagRepository = tagRepository;
+        this.slugAllocationLockRepository = slugAllocationLockRepository;
     }
 
     public Category requireCategory(long id, CategoryScope scope) {
@@ -116,6 +120,7 @@ public class TaxonomyService {
     }
 
     private void apply(Category category, CategoryRequest request, Long currentId) {
+        slugAllocationLockRepository.acquire();
         String name = normalizedName(request.name());
         String key = normalizedKey(name);
         rejectCategoryNameConflict(key, currentId);
@@ -133,6 +138,7 @@ public class TaxonomyService {
     }
 
     private void apply(Tag tag, TagRequest request, Long currentId) {
+        slugAllocationLockRepository.acquire();
         String name = normalizedName(request.name());
         String key = normalizedKey(name);
         rejectTagNameConflict(key, currentId);
@@ -187,7 +193,7 @@ public class TaxonomyService {
         return normalized;
     }
 
-    public static String normalizedKey(String input) { return normalizedName(input).toLowerCase(Locale.ROOT); }
+    public static String normalizedKey(String input) { return UCharacter.foldCase(normalizedName(input), true); }
 
     public static String slugBase(String input, String fallback) {
         String decomposed = Normalizer.normalize(input, Normalizer.Form.NFKD);

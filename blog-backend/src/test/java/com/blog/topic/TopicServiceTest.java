@@ -1,6 +1,7 @@
 package com.blog.topic;
 
 import com.blog.media.MediaAssetRepository;
+import com.blog.taxonomy.SlugAllocationLockRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -27,6 +28,8 @@ class TopicServiceTest {
     private TopicArticleRepository topicArticleRepository;
     @Mock
     private MediaAssetRepository mediaAssetRepository;
+    @Mock
+    private SlugAllocationLockRepository slugAllocationLockRepository;
     @InjectMocks
     private TopicService topicService;
 

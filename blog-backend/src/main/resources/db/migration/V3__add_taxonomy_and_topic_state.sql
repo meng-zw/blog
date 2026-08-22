@@ -12,3 +12,9 @@ ALTER TABLE topic
     ADD COLUMN sort_order INT NOT NULL DEFAULT 0 AFTER status,
     ADD COLUMN normalized_name VARCHAR(160) NOT NULL AFTER name,
     ADD CONSTRAINT uk_topic_normalized_name UNIQUE (normalized_name);
+
+CREATE TABLE taxonomy_slug_lock (
+    id BIGINT NOT NULL,
+    PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+INSERT INTO taxonomy_slug_lock (id) VALUES (1);

@@ -27,6 +27,8 @@ class TaxonomyServiceTest {
     private CategoryRepository categoryRepository;
     @Mock
     private TagRepository tagRepository;
+    @Mock
+    private SlugAllocationLockRepository slugAllocationLockRepository;
     @InjectMocks
     private TaxonomyService taxonomyService;
 

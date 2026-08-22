@@ -5,6 +5,7 @@ import com.blog.media.MediaAssetRepository;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
 import com.blog.taxonomy.TaxonomyService;
+import com.blog.taxonomy.SlugAllocationLockRepository;
 import com.blog.topic.dto.TopicResponse;
 import com.blog.topic.dto.TopicWriteRequest;
 import org.springframework.stereotype.Service;
@@ -23,12 +24,14 @@ public class TopicService {
     private final TopicRepository topicRepository;
     private final TopicArticleRepository topicArticleRepository;
     private final MediaAssetRepository mediaAssetRepository;
+    private final SlugAllocationLockRepository slugAllocationLockRepository;
 
     public TopicService(TopicRepository topicRepository, TopicArticleRepository topicArticleRepository,
-                        MediaAssetRepository mediaAssetRepository) {
+                        MediaAssetRepository mediaAssetRepository, SlugAllocationLockRepository slugAllocationLockRepository) {
         this.topicRepository = topicRepository;
         this.topicArticleRepository = topicArticleRepository;
         this.mediaAssetRepository = mediaAssetRepository;
+        this.slugAllocationLockRepository = slugAllocationLockRepository;
     }
 
     public List<TopicResponse> listAdmin() {
@@ -91,6 +94,7 @@ public class TopicService {
     }
 
     private void apply(Topic topic, TopicWriteRequest request, Long currentId) {
+        slugAllocationLockRepository.acquire();
         String name = TaxonomyService.normalizedName(request.name());
         String normalizedName = TaxonomyService.normalizedKey(name);
         topicRepository.findByNormalizedName(normalizedName).filter(found -> !found.getId().equals(currentId))
