@@ -78,6 +78,7 @@ public class ToolService {
         Tool tool = new Tool();
         tool.setSlug(allocateCreateSlug(input.slug(), input.name()));
         tool.setStatus(ToolStatus.DRAFT);
+        tool.setSortOrder(nextGlobalSortOrder());
         apply(tool, request, input, true);
         return adminDetail(toolRepository.save(tool));
     }
@@ -97,6 +98,7 @@ public class ToolService {
 
     @Transactional
     public AdminToolResponse publish(long id) {
+        slugAllocationLockRepository.lockSingleton();
         Tool tool = requireTool(id);
         requireState(tool, ToolStatus.DRAFT);
         tool.setStatus(ToolStatus.PUBLISHED);
@@ -106,6 +108,7 @@ public class ToolService {
 
     @Transactional
     public AdminToolResponse archive(long id) {
+        slugAllocationLockRepository.lockSingleton();
         Tool tool = requireTool(id);
         requireState(tool, ToolStatus.PUBLISHED);
         tool.setStatus(ToolStatus.ARCHIVED);
@@ -137,21 +140,22 @@ public class ToolService {
     }
 
     /**
-     * The request must contain every and only currently published tool ID. The list position becomes the persisted
+     * The request must contain every and only current tool ID, regardless of lifecycle status. The list position becomes the persisted
      * zero-based sort order; validation completes before any managed entity is changed, then one transaction saves it.
      */
     @Transactional
     public void reorder(List<Long> orderedIds) {
+        slugAllocationLockRepository.lockSingleton();
         if (orderedIds == null || orderedIds.stream().anyMatch(id -> id == null || id <= 0)) {
             throw new IllegalArgumentException("Tool IDs are required and must be positive");
         }
         if (new HashSet<>(orderedIds).size() != orderedIds.size()) {
             throw new IllegalArgumentException("Tool IDs must not contain duplicates");
         }
-        List<Tool> published = toolRepository.findAllPublishedForReorder();
-        Map<Long, Tool> byId = published.stream().collect(Collectors.toMap(Tool::getId, Function.identity()));
+        List<Tool> tools = toolRepository.findAllForReorder();
+        Map<Long, Tool> byId = tools.stream().collect(Collectors.toMap(Tool::getId, Function.identity()));
         if (byId.size() != orderedIds.size() || !byId.keySet().equals(Set.copyOf(orderedIds))) {
-            throw new IllegalArgumentException("Tool IDs must exactly match all published tools");
+            throw new IllegalArgumentException("Tool IDs must exactly match all tools");
         }
         List<Tool> reordered = orderedIds.stream().map(byId::get).toList();
         for (int index = 0; index < reordered.size(); index++) {
@@ -175,7 +179,6 @@ public class ToolService {
                 : taxonomyService.requireCategory(request.categoryId(), CategoryScope.TOOL));
         tool.setTags(taxonomyService.requireTags(request.tagIds()));
         tool.setFeatured(request.featured());
-        tool.setSortOrder(request.sortOrder());
     }
 
     private MediaAsset requireImage(Long id) {
@@ -200,6 +203,14 @@ public class ToolService {
             String candidate = suffix == 1 ? base : suffixed(base, suffix);
             if (!toolRepository.existsBySlug(candidate)) return candidate;
         }
+    }
+
+    private int nextGlobalSortOrder() {
+        int currentMaximum = toolRepository.findMaxSortOrder();
+        if (currentMaximum == Integer.MAX_VALUE) {
+            throw new ConflictException("Tool ordering capacity is exhausted");
+        }
+        return currentMaximum + 1;
     }
 
     private void updateExplicitSlug(Tool tool, String requestedSlug) {

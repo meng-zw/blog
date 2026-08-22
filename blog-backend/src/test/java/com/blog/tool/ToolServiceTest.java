@@ -63,6 +63,7 @@ class ToolServiceTest {
         when(taxonomyService.requireTags(Set.of(11L))).thenReturn(Set.of(tag));
         when(mediaAssetRepository.findById(4L)).thenReturn(Optional.of(cover));
         when(markdownRenderer.render("# Safe")).thenReturn("<h1 id=\"safe\">Safe</h1>");
+        when(toolRepository.findMaxSortOrder()).thenReturn(-1);
         when(toolRepository.existsBySlug("tool")).thenReturn(false);
         when(toolRepository.save(any(Tool.class))).thenAnswer(invocation -> {
             Tool saved = invocation.getArgument(0);
@@ -90,6 +91,7 @@ class ToolServiceTest {
         ToolService realRendererService = new ToolService(toolRepository, new MarkdownRenderer(), taxonomyService,
                 mediaAssetRepository, slugAllocationLockRepository, Clock.fixed(NOW, ZoneOffset.UTC));
         when(toolRepository.existsBySlug("tool")).thenReturn(false);
+        when(toolRepository.findMaxSortOrder()).thenReturn(-1);
         when(toolRepository.save(any(Tool.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         realRendererService.createDraft(request("Tool", null, "Summary", "<script>alert(1)</script>\n\n[bad](javascript:x)",
@@ -132,6 +134,20 @@ class ToolServiceTest {
         when(toolRepository.existsBySlug("taken")).thenReturn(true);
         assertThatThrownBy(() -> toolService.createDraft(request("Tool", "taken", "Summary", "body",
                 "https://example.com", null, null, Set.of(), false, 0))).isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    void createAppendsAfterTheGlobalMaximumAndDoesNotAcceptCallerChosenOrder() {
+        when(toolRepository.existsBySlug("tool")).thenReturn(false);
+        when(toolRepository.findMaxSortOrder()).thenReturn(41);
+        when(toolRepository.save(any(Tool.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        toolService.createDraft(request("Tool", null, "Summary", "body", "https://example.com", null, null,
+                Set.of(), false, -999));
+
+        ArgumentCaptor<Tool> saved = ArgumentCaptor.forClass(Tool.class);
+        verify(toolRepository).save(saved.capture());
+        assertThat(saved.getValue().getSortOrder()).isEqualTo(42);
     }
 
     @Test
@@ -198,10 +214,10 @@ class ToolServiceTest {
     }
 
     @Test
-    void reorderRequiresTheExactPublishedToolIdSetAndWritesContiguousPositionsOnlyAfterValidation() {
+    void reorderRequiresTheExactAllToolIdSetAndWritesContiguousPositionsOnlyAfterValidation() {
         Tool first = tool(1L, ToolStatus.PUBLISHED, "body");
-        Tool second = tool(2L, ToolStatus.PUBLISHED, "body");
-        when(toolRepository.findAllPublishedForReorder()).thenReturn(List.of(first, second));
+        Tool second = tool(2L, ToolStatus.ARCHIVED, "body");
+        when(toolRepository.findAllForReorder()).thenReturn(List.of(first, second));
 
         assertThatThrownBy(() -> toolService.reorder(List.of(2L, 2L))).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> toolService.reorder(List.of(1L))).isInstanceOf(IllegalArgumentException.class);
@@ -213,11 +229,25 @@ class ToolServiceTest {
         verify(toolRepository).saveAll(List.of(second, first));
     }
 
+    @Test
+    void publishingAfterACompleteReorderRetainsTheGlobalPosition() {
+        Tool draft = tool(2L, ToolStatus.DRAFT, "body");
+        draft.setSortOrder(7);
+        when(toolRepository.findById(2L)).thenReturn(Optional.of(draft));
+        when(toolRepository.save(draft)).thenReturn(draft);
+
+        toolService.publish(2L);
+
+        assertThat(draft.getStatus()).isEqualTo(ToolStatus.PUBLISHED);
+        assertThat(draft.getSortOrder()).isEqualTo(7);
+        verify(slugAllocationLockRepository).lockSingleton();
+    }
+
     private static ToolWriteRequest request(String name, String slug, String summary, String markdown, String officialUrl,
                                             Long coverMediaId, Long categoryId, Set<Long> tagIds, boolean featured,
                                             int sortOrder) {
         return new ToolWriteRequest(name, slug, summary, markdown, officialUrl, coverMediaId, categoryId, tagIds,
-                featured, sortOrder);
+                featured);
     }
 
     private static Tool tool(long id, ToolStatus status, String markdown) {

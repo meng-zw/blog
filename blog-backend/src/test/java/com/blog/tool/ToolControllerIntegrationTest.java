@@ -110,6 +110,6 @@ class ToolControllerIntegrationTest {
 
     private static String validRequest() {
         return "{\"name\":\"Tool\",\"summary\":\"Summary\",\"description_markdown\":\"# Safe\","
-                + "\"official_url\":\"https://example.com\",\"tag_ids\":[],\"featured\":false,\"sort_order\":0}";
+                + "\"official_url\":\"https://example.com\",\"tag_ids\":[],\"featured\":false}";
     }
 }

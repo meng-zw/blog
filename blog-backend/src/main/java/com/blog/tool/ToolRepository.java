@@ -34,7 +34,9 @@ public interface ToolRepository extends JpaRepository<Tool, Long> {
     Page<Tool> findAdminPage(@Param("status") ToolStatus status, Pageable pageable);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select tool from PublishingTool tool where tool.status = com.blog.tool.ToolStatus.PUBLISHED "
-            + "order by tool.sortOrder asc, tool.id asc")
-    List<Tool> findAllPublishedForReorder();
+    @Query("select tool from PublishingTool tool order by tool.sortOrder asc, tool.id asc")
+    List<Tool> findAllForReorder();
+
+    @Query("select coalesce(max(tool.sortOrder), -1) from PublishingTool tool")
+    int findMaxSortOrder();
 }

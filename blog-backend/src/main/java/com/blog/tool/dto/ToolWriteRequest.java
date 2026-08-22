@@ -17,6 +17,5 @@ public record ToolWriteRequest(
         @Positive Long coverMediaId,
         @Positive Long categoryId,
         @NotNull @Size(max = 50) Set<@NotNull @Positive Long> tagIds,
-        @NotNull Boolean featured,
-        @NotNull Integer sortOrder) {
+        @NotNull Boolean featured) {
 }
