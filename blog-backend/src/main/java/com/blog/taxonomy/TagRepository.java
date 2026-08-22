@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface TagRepository extends JpaRepository<Tag, Long> {
-    Optional<Tag> findByNameIgnoreCase(String name);
+    Optional<Tag> findByNormalizedName(String normalizedName);
     boolean existsBySlug(String slug);
     List<Tag> findAllByOrderByNameAsc();
 

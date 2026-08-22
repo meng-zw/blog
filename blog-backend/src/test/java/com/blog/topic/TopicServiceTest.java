@@ -63,6 +63,12 @@ class TopicServiceTest {
         verify(topicArticleRepository, never()).saveAll(any());
     }
 
+    @Test
+    void createRejectsOmittedArticleIds() {
+        assertThatIllegalArgumentException().isThrownBy(() -> topicService.create(
+                new com.blog.topic.dto.TopicWriteRequest("Java", null, null, TopicStatus.DRAFT, null, 0)));
+    }
+
     private static Topic topic(Long id) {
         Topic topic = new Topic();
         topic.setId(id);

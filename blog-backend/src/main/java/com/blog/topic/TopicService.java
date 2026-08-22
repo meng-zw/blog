@@ -32,7 +32,7 @@ public class TopicService {
     }
 
     public List<TopicResponse> listAdmin() {
-        return topicRepository.findAllByOrderByUpdatedAtDesc().stream().map(TopicService::response).toList();
+        return topicRepository.findAllByOrderBySortOrderAscIdAsc().stream().map(TopicService::response).toList();
     }
 
     public TopicResponse findAdmin(long id) {
@@ -40,7 +40,7 @@ public class TopicService {
     }
 
     public List<TopicResponse> listPublished() {
-        return topicRepository.findAllByStatusOrderByUpdatedAtDesc(TopicStatus.PUBLISHED).stream()
+        return topicRepository.findAllByStatusOrderBySortOrderAscIdAsc(TopicStatus.PUBLISHED).stream()
                 .map(TopicService::response).toList();
     }
 
@@ -53,19 +53,21 @@ public class TopicService {
 
     @Transactional
     public TopicResponse create(TopicWriteRequest request) {
+        List<Long> articles = articleIds(request.articleIds());
         Topic topic = new Topic();
         apply(topic, request, null);
         Topic saved = topicRepository.save(topic);
-        replaceArticles(saved.getId(), articleIds(request.articleIds()));
+        replaceArticles(saved.getId(), articles);
         return response(saved);
     }
 
     @Transactional
     public TopicResponse update(long id, TopicWriteRequest request) {
+        List<Long> articles = articleIds(request.articleIds());
         Topic topic = requireTopic(id);
         apply(topic, request, id);
         Topic saved = topicRepository.save(topic);
-        replaceArticles(id, articleIds(request.articleIds()));
+        replaceArticles(id, articles);
         return response(saved);
     }
 
@@ -90,14 +92,17 @@ public class TopicService {
 
     private void apply(Topic topic, TopicWriteRequest request, Long currentId) {
         String name = TaxonomyService.normalizedName(request.name());
-        topicRepository.findByNameIgnoreCase(name).filter(found -> !found.getId().equals(currentId))
+        String normalizedName = TaxonomyService.normalizedKey(name);
+        topicRepository.findByNormalizedName(normalizedName).filter(found -> !found.getId().equals(currentId))
                 .ifPresent(ignored -> { throw new ConflictException("A topic with this name already exists"); });
         topic.setName(name);
-        topic.setSlug(nextSlug(TaxonomyService.slugBase(name, "topic"), topic.getSlug()));
+        if (!normalizedName.equals(topic.getNormalizedName())) topic.setSlug(nextSlug(TaxonomyService.slugBase(name, "topic"), topic.getSlug()));
+        topic.setNormalizedName(normalizedName);
         topic.setDescription(request.description() == null ? null : Normalizer.normalize(request.description(), Normalizer.Form.NFKC).trim());
         topic.setCoverMedia(request.coverMediaId() == null ? null : mediaAssetRepository.findById(request.coverMediaId())
                 .orElseThrow(() -> new ResourceNotFoundException("Cover media asset", request.coverMediaId().toString())));
         topic.setStatus(request.status());
+        topic.setSortOrder(request.sortOrder());
     }
 
     private String nextSlug(String base, String currentSlug) {
@@ -134,9 +139,7 @@ public class TopicService {
     }
 
     private static List<Long> articleIds(List<Long> ids) {
-        if (ids == null) {
-            return List.of();
-        }
+        if (ids == null) throw new IllegalArgumentException("Article IDs are required");
         if (ids.stream().anyMatch(id -> id == null || id <= 0)) {
             throw new IllegalArgumentException("Article IDs must be positive");
         }
@@ -171,6 +174,6 @@ public class TopicService {
         MediaAsset cover = topic.getCoverMedia();
         String coverUrl = cover == null ? null : "/api/media/" + cover.getStorageKey();
         return new TopicResponse(topic.getId(), topic.getName(), topic.getSlug(), topic.getDescription(), coverUrl,
-                topic.getStatus());
+                topic.getStatus(), topic.getSortOrder());
     }
 }

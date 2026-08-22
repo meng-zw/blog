@@ -32,8 +32,8 @@ class TaxonomyServiceTest {
 
     @Test
     void createCategoryRejectsNfkcNormalizedCaseInsensitiveDuplicate() {
-        Category existing = category(41L, "Café", CategoryScope.ARTICLE);
-        when(categoryRepository.findByNameIgnoreCase("Café")).thenReturn(Optional.of(existing));
+        Category existing = category(41L, "café", CategoryScope.ARTICLE);
+        when(categoryRepository.findByNormalizedName("café")).thenReturn(Optional.of(existing));
 
         assertThatThrownBy(() -> taxonomyService.createCategory(
                 new CategoryRequest("  Cafe\u0301  ", "notes", 3, CategoryScope.ARTICLE)))
@@ -42,8 +42,8 @@ class TaxonomyServiceTest {
 
     @Test
     void createTagRejectsNfkcNormalizedCaseInsensitiveDuplicate() {
-        Tag existing = tag(42L, "Kotlin");
-        when(tagRepository.findByNameIgnoreCase("Kotlin")).thenReturn(Optional.of(existing));
+        Tag existing = tag(42L, "kotlin");
+        when(tagRepository.findByNormalizedName("kotlin")).thenReturn(Optional.of(existing));
 
         assertThatThrownBy(() -> taxonomyService.createTag(new TagRequest("  Kotlin  ")))
                 .isInstanceOf(ConflictException.class);
@@ -51,7 +51,7 @@ class TaxonomyServiceTest {
 
     @Test
     void createCategoryAppendsDeterministicSlugSuffixOnlyForCollision() {
-        when(categoryRepository.findByNameIgnoreCase("C")).thenReturn(Optional.empty());
+        when(categoryRepository.findByNormalizedName("c")).thenReturn(Optional.empty());
         when(categoryRepository.existsBySlug("c")).thenReturn(true);
         when(categoryRepository.existsBySlug("c-2")).thenReturn(false);
         when(categoryRepository.save(any(Category.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -86,6 +86,28 @@ class TaxonomyServiceTest {
 
         assertThatThrownBy(() -> taxonomyService.deleteTag(9L))
                 .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    void updateCategoryRejectsChangingArticleCategoryWithArticleReferencesToToolScope() {
+        Category category = category(7L, "Java", CategoryScope.ARTICLE);
+        when(categoryRepository.findById(7L)).thenReturn(Optional.of(category));
+        when(categoryRepository.findByNormalizedName("java")).thenReturn(Optional.of(category));
+        when(categoryRepository.countArticleReferences(7L)).thenReturn(1L);
+
+        assertThatThrownBy(() -> taxonomyService.updateCategory(7L,
+                new CategoryRequest("Java", null, 0, CategoryScope.TOOL))).isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    void updateCategoryRejectsChangingToolCategoryWithToolReferencesToArticleScope() {
+        Category category = category(8L, "Editors", CategoryScope.TOOL);
+        when(categoryRepository.findById(8L)).thenReturn(Optional.of(category));
+        when(categoryRepository.findByNormalizedName("editors")).thenReturn(Optional.of(category));
+        when(categoryRepository.countToolReferences(8L)).thenReturn(1L);
+
+        assertThatThrownBy(() -> taxonomyService.updateCategory(8L,
+                new CategoryRequest("Editors", null, 0, CategoryScope.ARTICLE))).isInstanceOf(ConflictException.class);
     }
 
     private static Category category(Long id, String name, CategoryScope scope) {

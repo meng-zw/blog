@@ -9,6 +9,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import jakarta.validation.ConstraintViolationException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
@@ -38,6 +42,12 @@ public class GlobalExceptionHandler {
             errors.putIfAbsent(error.getField(), error.getDefaultMessage());
         }
         return problem(HttpStatus.BAD_REQUEST, "Validation failed", "Request validation failed", request, errors);
+    }
+
+    @ExceptionHandler({HandlerMethodValidationException.class, ConstraintViolationException.class,
+            HttpMessageNotReadableException.class})
+    ResponseEntity<ProblemDetail> handleClientValidation(Exception exception, HttpServletRequest request) {
+        return problem(HttpStatus.BAD_REQUEST, "Validation failed", "Request validation failed", request, null);
     }
 
     @ExceptionHandler(BadCredentialsException.class)

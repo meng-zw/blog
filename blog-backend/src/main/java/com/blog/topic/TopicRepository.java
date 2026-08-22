@@ -6,9 +6,9 @@ import java.util.List;
 import java.util.Optional;
 
 public interface TopicRepository extends JpaRepository<Topic, Long> {
-    Optional<Topic> findByNameIgnoreCase(String name);
+    Optional<Topic> findByNormalizedName(String normalizedName);
     Optional<Topic> findBySlug(String slug);
     boolean existsBySlug(String slug);
-    List<Topic> findAllByOrderByUpdatedAtDesc();
-    List<Topic> findAllByStatusOrderByUpdatedAtDesc(TopicStatus status);
+    List<Topic> findAllByOrderBySortOrderAscIdAsc();
+    List<Topic> findAllByStatusOrderBySortOrderAscIdAsc(TopicStatus status);
 }

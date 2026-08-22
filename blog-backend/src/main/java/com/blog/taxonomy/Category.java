@@ -20,6 +20,9 @@ public class Category extends AuditedEntity {
     @Column(nullable = false, length = 120)
     private String name;
 
+    @Column(name = "normalized_name", nullable = false, length = 120, unique = true)
+    private String normalizedName;
+
     @Column(nullable = false, unique = true, length = 160)
     private String slug;
 
@@ -37,6 +40,8 @@ public class Category extends AuditedEntity {
     public void setId(Long id) { this.id = id; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
+    public String getNormalizedName() { return normalizedName; }
+    public void setNormalizedName(String normalizedName) { this.normalizedName = normalizedName; }
     public String getSlug() { return slug; }
     public void setSlug(String slug) { this.slug = slug; }
     public String getDescription() { return description; }

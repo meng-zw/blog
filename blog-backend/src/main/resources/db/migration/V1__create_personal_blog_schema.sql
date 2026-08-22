@@ -102,7 +102,7 @@ CREATE TABLE article_tag (
     tag_id BIGINT NOT NULL,
     PRIMARY KEY (article_id, tag_id),
     CONSTRAINT fk_article_tag_article FOREIGN KEY (article_id) REFERENCES article (id) ON DELETE CASCADE,
-    CONSTRAINT fk_article_tag_tag FOREIGN KEY (tag_id) REFERENCES tag (id) ON DELETE CASCADE
+    CONSTRAINT fk_article_tag_tag FOREIGN KEY (tag_id) REFERENCES tag (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE topic_article (
@@ -140,5 +140,5 @@ CREATE TABLE tool_tag (
     tag_id BIGINT NOT NULL,
     PRIMARY KEY (tool_id, tag_id),
     CONSTRAINT fk_tool_tag_tool FOREIGN KEY (tool_id) REFERENCES tool (id) ON DELETE CASCADE,
-    CONSTRAINT fk_tool_tag_tag FOREIGN KEY (tag_id) REFERENCES tag (id) ON DELETE CASCADE
+    CONSTRAINT fk_tool_tag_tag FOREIGN KEY (tag_id) REFERENCES tag (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

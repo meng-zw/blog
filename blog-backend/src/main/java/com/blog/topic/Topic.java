@@ -24,6 +24,9 @@ public class Topic extends AuditedEntity {
     @Column(nullable = false, length = 160)
     private String name;
 
+    @Column(name = "normalized_name", nullable = false, length = 160, unique = true)
+    private String normalizedName;
+
     @Column(nullable = false, unique = true, length = 180)
     private String slug;
 
@@ -38,10 +41,15 @@ public class Topic extends AuditedEntity {
     @Column(nullable = false, length = 20)
     private TopicStatus status;
 
+    @Column(name = "sort_order", nullable = false)
+    private int sortOrder;
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
+    public String getNormalizedName() { return normalizedName; }
+    public void setNormalizedName(String normalizedName) { this.normalizedName = normalizedName; }
     public String getSlug() { return slug; }
     public void setSlug(String slug) { this.slug = slug; }
     public String getDescription() { return description; }
@@ -50,4 +58,6 @@ public class Topic extends AuditedEntity {
     public void setCoverMedia(MediaAsset coverMedia) { this.coverMedia = coverMedia; }
     public TopicStatus getStatus() { return status; }
     public void setStatus(TopicStatus status) { this.status = status; }
+    public int getSortOrder() { return sortOrder; }
+    public void setSortOrder(int sortOrder) { this.sortOrder = sortOrder; }
 }

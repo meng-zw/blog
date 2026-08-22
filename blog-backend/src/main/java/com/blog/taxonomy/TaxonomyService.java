@@ -117,9 +117,16 @@ public class TaxonomyService {
 
     private void apply(Category category, CategoryRequest request, Long currentId) {
         String name = normalizedName(request.name());
-        rejectCategoryNameConflict(name, currentId);
+        String key = normalizedKey(name);
+        rejectCategoryNameConflict(key, currentId);
+        if (category.getScope() != null && category.getScope() != request.scope()
+                && ((category.getScope() == CategoryScope.ARTICLE && categoryRepository.countArticleReferences(category.getId()) > 0)
+                || (category.getScope() == CategoryScope.TOOL && categoryRepository.countToolReferences(category.getId()) > 0))) {
+            throw new ConflictException("Referenced category scope cannot be changed");
+        }
         category.setName(name);
-        category.setSlug(nextCategorySlug(slugBase(name, "category"), category.getSlug()));
+        if (!key.equals(category.getNormalizedName())) category.setSlug(nextCategorySlug(slugBase(name, "category"), category.getSlug()));
+        category.setNormalizedName(key);
         category.setDescription(normalizedOptionalText(request.description()));
         category.setSortOrder(request.sortOrder());
         category.setScope(request.scope());
@@ -127,18 +134,20 @@ public class TaxonomyService {
 
     private void apply(Tag tag, TagRequest request, Long currentId) {
         String name = normalizedName(request.name());
-        rejectTagNameConflict(name, currentId);
+        String key = normalizedKey(name);
+        rejectTagNameConflict(key, currentId);
         tag.setName(name);
-        tag.setSlug(nextTagSlug(slugBase(name, "tag"), tag.getSlug()));
+        if (!key.equals(tag.getNormalizedName())) tag.setSlug(nextTagSlug(slugBase(name, "tag"), tag.getSlug()));
+        tag.setNormalizedName(key);
     }
 
     private void rejectCategoryNameConflict(String name, Long currentId) {
-        categoryRepository.findByNameIgnoreCase(name).filter(found -> !found.getId().equals(currentId))
+        categoryRepository.findByNormalizedName(name).filter(found -> !found.getId().equals(currentId))
                 .ifPresent(ignored -> { throw new ConflictException("A category with this name already exists"); });
     }
 
     private void rejectTagNameConflict(String name, Long currentId) {
-        tagRepository.findByNameIgnoreCase(name).filter(found -> !found.getId().equals(currentId))
+        tagRepository.findByNormalizedName(name).filter(found -> !found.getId().equals(currentId))
                 .ifPresent(ignored -> { throw new ConflictException("A tag with this name already exists"); });
     }
 
@@ -177,6 +186,8 @@ public class TaxonomyService {
         }
         return normalized;
     }
+
+    public static String normalizedKey(String input) { return normalizedName(input).toLowerCase(Locale.ROOT); }
 
     public static String slugBase(String input, String fallback) {
         String decomposed = Normalizer.normalize(input, Normalizer.Form.NFKD);
