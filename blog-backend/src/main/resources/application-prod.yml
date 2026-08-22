@@ -9,3 +9,8 @@ spring:
       ddl-auto: validate
   flyway:
     enabled: true
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true
