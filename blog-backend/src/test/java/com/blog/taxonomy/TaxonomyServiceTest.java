@@ -128,6 +128,22 @@ class TaxonomyServiceTest {
         inOrder(slugAllocationLockRepository, categoryRepository).verify(slugAllocationLockRepository).lockSingleton();
     }
 
+    @Test
+    void rejectsUnicodeExpansionBeyondActualDisplayColumnLimitBeforeRepositoryAccess() {
+        String expanded = "\ufdfa".repeat(121);
+        assertThatIllegalArgumentException().isThrownBy(() -> taxonomyService.createCategory(
+                new CategoryRequest(expanded, null, 0, CategoryScope.ARTICLE)));
+    }
+
+    @Test
+    void acceptsExactNormalizedDisplayBoundary() {
+        String boundary = "a".repeat(120);
+        when(categoryRepository.findByNormalizedName(boundary)).thenReturn(Optional.empty());
+        when(categoryRepository.existsBySlug(boundary)).thenReturn(false);
+        when(categoryRepository.save(any(Category.class))).thenAnswer(i -> i.getArgument(0));
+        assertThat(taxonomyService.createCategory(new CategoryRequest(boundary, null, 0, CategoryScope.ARTICLE)).name()).hasSize(120);
+    }
+
     private static Category category(Long id, String name, CategoryScope scope) {
         Category category = new Category();
         category.setId(id);

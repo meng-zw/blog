@@ -97,7 +97,9 @@ public class TopicService {
 
     private void apply(Topic topic, TopicWriteRequest request, Long currentId) {
         String name = TaxonomyService.normalizedName(request.name());
+        TaxonomyService.validateNameBounds(name, 160);
         String normalizedName = TaxonomyService.normalizedKey(name);
+        TaxonomyService.validateKeyBounds(normalizedName);
         topicRepository.findByNormalizedName(normalizedName).filter(found -> !found.getId().equals(currentId))
                 .ifPresent(ignored -> { throw new ConflictException("A topic with this name already exists"); });
         topic.setName(name);

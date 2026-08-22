@@ -125,7 +125,9 @@ public class TaxonomyService {
 
     private void apply(Category category, CategoryRequest request, Long currentId) {
         String name = normalizedName(request.name());
+        validateNameBounds(name, 120);
         String key = normalizedKey(name);
+        validateKeyBounds(key);
         rejectCategoryNameConflict(key, currentId);
         if (category.getScope() != null && category.getScope() != request.scope()
                 && ((category.getScope() == CategoryScope.ARTICLE && categoryRepository.countArticleReferences(category.getId()) > 0)
@@ -142,7 +144,9 @@ public class TaxonomyService {
 
     private void apply(Tag tag, TagRequest request, Long currentId) {
         String name = normalizedName(request.name());
+        validateNameBounds(name, 120);
         String key = normalizedKey(name);
+        validateKeyBounds(key);
         rejectTagNameConflict(key, currentId);
         tag.setName(name);
         if (!key.equals(tag.getNormalizedName())) tag.setSlug(nextTagSlug(slugBase(name, "tag"), tag.getSlug()));
@@ -196,6 +200,14 @@ public class TaxonomyService {
     }
 
     public static String normalizedKey(String input) { return UCharacter.foldCase(normalizedName(input), true); }
+
+    public static void validateNameBounds(String name, int maximum) {
+        if (name.length() > maximum) throw new IllegalArgumentException("Normalized name is too long");
+    }
+
+    public static void validateKeyBounds(String key) {
+        if (key.length() > 255) throw new IllegalArgumentException("Normalized name key is too long");
+    }
 
     public static String slugBase(String input, String fallback) {
         String decomposed = Normalizer.normalize(input, Normalizer.Form.NFKD);
