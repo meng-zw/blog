@@ -7,6 +7,7 @@ import com.blog.identity.LoginAttemptService;
 import com.blog.shared.error.GlobalExceptionHandler;
 import com.blog.shared.web.TraceIdFilter;
 import com.blog.taxonomy.dto.CategoryResponse;
+import com.blog.shared.web.PageResponse;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
@@ -52,6 +53,19 @@ class TaxonomyControllerTest {
         mockMvc.perform(get("/api/public/taxonomy/categories").contextPath("/api").param("scope", "ARTICLE"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].slug").value("java"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void adminCategoriesUseTheBoundedPageContract() throws Exception {
+        var item = new CategoryResponse(1L, "Java", "java", "JVM", 0, CategoryScope.ARTICLE);
+        when(taxonomyService.pageCategories(CategoryScope.ARTICLE, 1, 20))
+                .thenReturn(new PageResponse<>(List.of(item), 1, 20, 21, 2));
+
+        mockMvc.perform(get("/api/admin/taxonomy/categories").contextPath("/api")
+                        .param("scope", "ARTICLE").param("page", "1").param("size", "20"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[0].slug").value("java"))
+                .andExpect(jsonPath("$.page").value(1)).andExpect(jsonPath("$.total").value(21));
     }
 
     @Test

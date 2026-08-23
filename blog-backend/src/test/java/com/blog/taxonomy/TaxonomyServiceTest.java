@@ -11,6 +11,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
+import java.util.List;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -42,6 +45,15 @@ class TaxonomyServiceTest {
         assertThatThrownBy(() -> taxonomyService.createCategory(
                 new CategoryRequest("  Cafe\u0301  ", "notes", 3, CategoryScope.ARTICLE)))
                 .isInstanceOf(ConflictException.class);
+    }
+
+    @Test
+    void tagPagePassesTrimmedKeywordAndPreservesRepositoryTotal() {
+        var pageable = PageRequest.of(1, 20);
+        when(tagRepository.findAdminPage("java", pageable)).thenReturn(new PageImpl<>(List.of(tag(2L, "Java")), pageable, 21));
+        var result = taxonomyService.pageTags("  java  ", 1, 20);
+        assertThat(result.total()).isEqualTo(21);
+        verify(tagRepository).findAdminPage("java", pageable);
     }
 
     @Test

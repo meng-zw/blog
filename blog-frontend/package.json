@@ -5,18 +5,28 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:e2e": "playwright test",
+    "typecheck": "vue-tsc --noEmit",
+    "lint:legacy-routes": "node scripts/lint-legacy-routes.mjs",
+    "test:nginx-template": "node scripts/test-nginx-template.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@testing-library/vue": "^8.1.0",
     "@vitejs/plugin-vue": "^6.0.3",
+    "@vue/test-utils": "^2.4.6",
     "@vue/typescript": "^1.8.20",
+    "jsdom": "^26.1.0",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
+    "vitest": "^3.2.4",
     "vue-tsc": "^2.2.0"
   },
   "dependencies": {
-    "axios": "^1.13.2",
     "element-plus": "^2.13.1",
     "pinia": "^3.0.4",
     "vditor": "^3.11.2",

@@ -7,6 +7,8 @@ import com.blog.taxonomy.dto.CategoryResponse;
 import com.blog.taxonomy.dto.TagRequest;
 import com.blog.taxonomy.dto.TagResponse;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.PageRequest;
+import com.blog.shared.web.PageResponse;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.text.Normalizer;
@@ -65,6 +67,24 @@ public class TaxonomyService {
 
     public List<TagResponse> listTags() {
         return tagRepository.findAllByOrderByNameAsc().stream().map(TaxonomyService::tagResponse).toList();
+    }
+
+    public PageResponse<CategoryResponse> pageCategories(CategoryScope scope, int page, int size) {
+        validatePage(page, size);
+        var result = scope == null ? categoryRepository.findAllByOrderByScopeAscSortOrderAscNameAsc(PageRequest.of(page, size))
+                : categoryRepository.findAllByScopeOrderBySortOrderAscNameAsc(scope, PageRequest.of(page, size));
+        return PageResponse.from(result.map(TaxonomyService::categoryResponse));
+    }
+
+    public PageResponse<TagResponse> pageTags(String keyword, int page, int size) {
+        validatePage(page, size);
+        return PageResponse.from(tagRepository.findAdminPage(blankToNull(keyword), PageRequest.of(page, size)).map(TaxonomyService::tagResponse));
+    }
+
+    private static String blankToNull(String value) { return value == null || value.isBlank() ? null : value.trim(); }
+
+    private static void validatePage(int page, int size) {
+        if (page < 0 || size < 1 || size > 50) throw new IllegalArgumentException("Page must be zero or greater and size between 1 and 50");
     }
 
     @Transactional

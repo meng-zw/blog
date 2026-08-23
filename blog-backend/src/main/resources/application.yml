@@ -39,9 +39,6 @@ blog:
       password: ${BLOG_ADMIN_PASSWORD:}
       display-name: ${BLOG_ADMIN_DISPLAY_NAME:小M}
 
-upload:
-  dir: ./uploads
-
 springdoc:
   api-docs:
     path: /api-docs

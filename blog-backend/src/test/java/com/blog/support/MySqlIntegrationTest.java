@@ -10,7 +10,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest(properties = {"spring.flyway.enabled=false", "spring.jpa.hibernate.ddl-auto=none"})
 @ActiveProfiles("test")
-@Testcontainers
+@Testcontainers(disabledWithoutDocker = true)
 public abstract class MySqlIntegrationTest {
     @Container
     private static final MySQLContainer<?> MYSQL = new MySQLContainer<>("mysql:8.4");

@@ -7,11 +7,15 @@ import com.blog.media.MediaAsset;
 import com.blog.media.MediaAssetRepository;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
+import com.blog.shared.web.PageResponse;
 import com.blog.taxonomy.TaxonomyService;
 import com.blog.taxonomy.SlugAllocationLockRepository;
 import com.blog.topic.dto.TopicResponse;
-import com.blog.topic.dto.TopicDetailResponse;
+import com.blog.topic.dto.PublicTopicDetailResponse;
+import com.blog.topic.dto.PublicTopicSummaryResponse;
 import com.blog.topic.dto.TopicWriteRequest;
+import com.blog.topic.dto.AdminTopicResponse;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -45,27 +49,35 @@ public class TopicService {
         this.topicMembershipManager = topicMembershipManager;
     }
 
-    public List<TopicResponse> listAdmin() {
-        return topicRepository.findAllByOrderBySortOrderAscIdAsc().stream().map(TopicService::response).toList();
+    public PageResponse<AdminTopicResponse> listAdmin(int page, int size, TopicStatus status, String keyword) {
+        if (page < 0 || size < 1 || size > 50) throw new IllegalArgumentException("Topic page must be zero or greater and size between 1 and 50");
+        var topics = topicRepository.findAdminPage(status, blankToNull(keyword), PageRequest.of(page, size));
+        var ids = topics.stream().map(Topic::getId).toList();
+        Map<Long, List<Long>> articleIds = topicArticleRepository.findByTopicIdInOrderByTopicIdAscSortOrderAsc(ids).stream()
+                .collect(java.util.stream.Collectors.groupingBy(TopicArticle::getTopicId, LinkedHashMap::new,
+                        java.util.stream.Collectors.mapping(TopicArticle::getArticleId, java.util.stream.Collectors.toList())));
+        return PageResponse.from(topics.map(topic -> adminResponse(topic, articleIds.getOrDefault(topic.getId(), List.of()))));
     }
 
-    public TopicResponse findAdmin(long id) {
-        return response(requireTopic(id));
+    private static String blankToNull(String value) { return value == null || value.isBlank() ? null : value.trim(); }
+
+    public AdminTopicResponse findAdmin(long id) {
+        Topic topic = requireTopic(id);
+        return adminResponse(topic, topicArticleRepository.findByTopicIdOrderBySortOrderAsc(id).stream().map(TopicArticle::getArticleId).toList());
     }
 
-    public List<TopicResponse> listPublished() {
-        return topicRepository.findAllByStatusOrderBySortOrderAscIdAsc(TopicStatus.PUBLISHED).stream()
-                .map(TopicService::response).toList();
+    public PageResponse<PublicTopicSummaryResponse> listPublished(int page, int size) {
+        if (page < 0) {
+            throw new IllegalArgumentException("Topic page must be zero or greater");
+        }
+        if (size < 1 || size > 50) {
+            throw new IllegalArgumentException("Topic page size must be between 1 and 50");
+        }
+        return PageResponse.from(topicRepository.findPublishedPage(PageRequest.of(page, size))
+                .map(TopicService::publicResponse));
     }
 
-    public TopicResponse findPublishedBySlug(String slug) {
-        Topic topic = topicRepository.findBySlug(slug)
-                .filter(found -> found.getStatus() == TopicStatus.PUBLISHED)
-                .orElseThrow(() -> new ResourceNotFoundException("Published topic", slug));
-        return response(topic);
-    }
-
-    public TopicDetailResponse findPublishedDetailBySlug(String slug) {
+    public PublicTopicDetailResponse findPublishedDetailBySlug(String slug) {
         Topic topic = topicRepository.findBySlug(slug)
                 .filter(found -> found.getStatus() == TopicStatus.PUBLISHED)
                 .orElseThrow(() -> new ResourceNotFoundException("Published topic", slug));
@@ -75,9 +87,9 @@ public class TopicService {
                 .filter(article -> visible(article, now))
                 .map(ArticleService::summary)
                 .toList();
-        TopicResponse metadata = response(topic);
-        return new TopicDetailResponse(metadata.id(), metadata.name(), metadata.slug(), metadata.description(),
-                metadata.coverUrl(), metadata.status(), metadata.sortOrder(), articles);
+        PublicTopicSummaryResponse metadata = publicResponse(topic);
+        return new PublicTopicDetailResponse(metadata.id(), metadata.name(), metadata.slug(), metadata.description(),
+                metadata.coverUrl(), articles);
     }
 
     @Transactional
@@ -198,5 +210,19 @@ public class TopicService {
         String coverUrl = cover == null ? null : "/api/media/" + cover.getStorageKey();
         return new TopicResponse(topic.getId(), topic.getName(), topic.getSlug(), topic.getDescription(), coverUrl,
                 topic.getStatus(), topic.getSortOrder());
+    }
+
+    private AdminTopicResponse adminResponse(Topic topic, List<Long> articleIds) {
+        TopicResponse metadata = response(topic);
+        return new AdminTopicResponse(metadata.id(), metadata.name(), metadata.slug(), metadata.description(),
+                metadata.coverUrl(), topic.getCoverMedia() == null ? null : topic.getCoverMedia().getId(),
+                metadata.status(), metadata.sortOrder(), articleIds);
+    }
+
+    private static PublicTopicSummaryResponse publicResponse(Topic topic) {
+        MediaAsset cover = topic.getCoverMedia();
+        String coverUrl = cover == null ? null : "/api/media/" + cover.getStorageKey();
+        return new PublicTopicSummaryResponse(topic.getId(), topic.getName(), topic.getSlug(),
+                topic.getDescription(), coverUrl);
     }
 }

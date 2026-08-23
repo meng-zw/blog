@@ -1,0 +1,8 @@
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/vue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import AdminTaxonomyPage from './AdminTaxonomyPage.vue'
+vi.mock('../admin-api',()=>({listCategories:vi.fn(),listTags:vi.fn(),createCategory:vi.fn(),updateCategory:vi.fn(),removeCategory:vi.fn(),createTag:vi.fn(),updateTag:vi.fn(),removeTag:vi.fn()}))
+afterEach(cleanup)
+beforeEach(async()=>{vi.clearAllMocks();const api=await import('../admin-api');vi.mocked(api.listCategories).mockResolvedValue({items:[],page:0,size:20,total:0,totalPages:0});vi.mocked(api.listTags).mockResolvedValue({items:[],page:0,size:20,total:0,totalPages:0})})
+describe('AdminTaxonomyPage',()=>{it('synchronizes category scope and tag keyword filters with URL and resets pages',async()=>{const api=await import('../admin-api');const router=createRouter({history:createMemoryHistory(),routes:[{path:'/admin/taxonomy',component:AdminTaxonomyPage}]});await router.push('/admin/taxonomy?categoryPage=2&tagPage=3');await router.isReady();render(AdminTaxonomyPage,{global:{plugins:[router]}});await waitFor(()=>expect(api.listCategories).toHaveBeenCalled());await fireEvent.update(screen.getByLabelText('筛选范围'),'TOOL');await waitFor(()=>expect(router.currentRoute.value.query.scope).toBe('TOOL'));await fireEvent.update(screen.getByLabelText('筛选关键词'),'效率');await fireEvent.click(screen.getByRole('button',{name:'筛选标签'}));await waitFor(()=>expect(api.listTags).toHaveBeenLastCalledWith(0,20,'效率'));expect(router.currentRoute.value.query.categoryPage).toBeUndefined();expect(router.currentRoute.value.query.tagPage).toBeUndefined()})})

@@ -37,10 +37,16 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
                                  Pageable pageable);
 
     @Query("select article from PublishingArticle article where (:status is null or article.status = :status) "
-            + "and (:contentType is null or article.contentType = :contentType)")
+            + "and (:contentType is null or article.contentType = :contentType) "
+            + "and (:keyword is null or lower(article.title) like lower(concat('%', :keyword, '%')))")
     Page<Article> findAdminPage(@Param("status") ArticleStatus status,
                                 @Param("contentType") ContentType contentType,
+                                @Param("keyword") String keyword,
                                 Pageable pageable);
+
+    @EntityGraph(attributePaths = {"coverMedia", "category", "tags"})
+    @Query("select distinct article from PublishingArticle article where article.id in :ids")
+    List<Article> findAdminSummariesByIdIn(@Param("ids") List<Long> ids);
 
     @EntityGraph(attributePaths = {"coverMedia", "category", "tags", "topic"})
     @Query("select article from PublishingArticle article where article.slug = :slug "

@@ -1,6 +1,7 @@
 package com.blog.topic;
 
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Page;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -14,7 +15,21 @@ public interface TopicRepository extends JpaRepository<Topic, Long> {
     Optional<Topic> findBySlug(String slug);
     boolean existsBySlug(String slug);
     List<Topic> findAllByOrderBySortOrderAscIdAsc();
-    List<Topic> findAllByStatusOrderBySortOrderAscIdAsc(TopicStatus status);
+
+    @EntityGraph(attributePaths = {"coverMedia"})
+    @Query(value = "select topic from Topic topic where (:status is null or topic.status = :status) "
+            + "and (:keyword is null or lower(topic.name) like lower(concat('%', :keyword, '%'))) "
+            + "order by topic.sortOrder asc, topic.id asc",
+            countQuery = "select count(topic) from Topic topic where (:status is null or topic.status = :status) "
+                    + "and (:keyword is null or lower(topic.name) like lower(concat('%', :keyword, '%')))")
+    Page<Topic> findAdminPage(@Param("status") TopicStatus status, @Param("keyword") String keyword, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"coverMedia"})
+    @Query(value = "select topic from Topic topic where topic.status = com.blog.topic.TopicStatus.PUBLISHED "
+            + "order by topic.sortOrder asc, topic.id asc",
+            countQuery = "select count(topic) from Topic topic "
+                    + "where topic.status = com.blog.topic.TopicStatus.PUBLISHED")
+    Page<Topic> findPublishedPage(Pageable pageable);
 
     @EntityGraph(attributePaths = {"coverMedia"})
     @Query("select topic from Topic topic where topic.status = :status order by topic.sortOrder asc, topic.id asc")

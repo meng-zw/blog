@@ -2,6 +2,7 @@ package com.blog.topic;
 
 import com.blog.topic.dto.TopicResponse;
 import com.blog.topic.dto.TopicWriteRequest;
+import com.blog.topic.dto.AdminTopicResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -18,6 +19,8 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import com.blog.shared.web.PageResponse;
+import org.springframework.web.bind.annotation.RequestParam;
 
 @Validated
 @RestController
@@ -30,12 +33,14 @@ public class AdminTopicController {
     }
 
     @GetMapping
-    public List<TopicResponse> list() {
-        return topicService.listAdmin();
+    public PageResponse<AdminTopicResponse> list(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size, @RequestParam(required = false) TopicStatus status,
+            @RequestParam(required = false) String keyword) {
+        return topicService.listAdmin(page, size, status, keyword);
     }
 
     @GetMapping("/{id}")
-    public TopicResponse get(@PathVariable long id) {
+    public AdminTopicResponse get(@PathVariable long id) {
         return topicService.findAdmin(id);
     }
 

@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import com.blog.shared.web.PageResponse;
 
 @RestController
 @RequestMapping
@@ -39,8 +40,9 @@ public class TaxonomyController {
     }
 
     @GetMapping("/admin/taxonomy/categories")
-    public List<CategoryResponse> adminCategories(@RequestParam(required = false) CategoryScope scope) {
-        return taxonomyService.listCategories(scope);
+    public PageResponse<CategoryResponse> adminCategories(@RequestParam(required = false) CategoryScope scope,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        return taxonomyService.pageCategories(scope, page, size);
     }
 
     @PostMapping("/admin/taxonomy/categories")
@@ -61,8 +63,9 @@ public class TaxonomyController {
     }
 
     @GetMapping("/admin/taxonomy/tags")
-    public List<TagResponse> adminTags() {
-        return taxonomyService.listTags();
+    public PageResponse<TagResponse> adminTags(@RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size, @RequestParam(required = false) String keyword) {
+        return taxonomyService.pageTags(keyword, page, size);
     }
 
     @PostMapping("/admin/taxonomy/tags")

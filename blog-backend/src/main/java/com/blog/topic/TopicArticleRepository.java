@@ -10,6 +10,7 @@ import java.util.Optional;
 
 public interface TopicArticleRepository extends JpaRepository<TopicArticle, TopicArticle.Id> {
     List<TopicArticle> findByTopicIdOrderBySortOrderAsc(long topicId);
+    List<TopicArticle> findByTopicIdInOrderByTopicIdAscSortOrderAsc(List<Long> topicIds);
     Optional<TopicArticle> findByArticleId(long articleId);
 
     @Modifying(flushAutomatically = true, clearAutomatically = true)

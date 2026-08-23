@@ -1,6 +1,7 @@
 package com.blog.article;
 
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -10,6 +11,7 @@ public class ArticlePublishScheduler {
     private final ArticleService articleService;
     private final Clock clock;
 
+    @Autowired
     public ArticlePublishScheduler(ArticleService articleService) {
         this(articleService, Clock.systemUTC());
     }

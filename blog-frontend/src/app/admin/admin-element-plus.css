@@ -1,0 +1,59 @@
+.el-button {
+  --el-button-border-radius: 6px;
+  font-family: var(--sans);
+  font-weight: 600;
+  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
+}
+
+.el-button--primary {
+  --el-button-bg-color: #5f4635;
+  --el-button-border-color: #5f4635;
+  --el-button-hover-bg-color: #493528;
+  --el-button-hover-border-color: #493528;
+  --el-button-active-bg-color: #35261d;
+  --el-button-active-border-color: #35261d;
+}
+
+.el-button--success {
+  --el-button-bg-color: #3f7a52;
+  --el-button-border-color: #3f7a52;
+  --el-button-hover-bg-color: #315f40;
+  --el-button-hover-border-color: #315f40;
+}
+
+.el-card {
+  --el-card-bg-color: #fff;
+  --el-card-border-color: #ddd5cc;
+  border-radius: 10px;
+  box-shadow: none;
+  transition: border-color 180ms ease;
+}
+
+.el-card:hover {
+  box-shadow: none;
+}
+
+.el-card.is-hover-shadow:hover {
+  box-shadow: 0 10px 26px rgb(51 42 34 / 10%);
+  border-color: #b9afa5;
+}
+
+.el-input__wrapper,
+.el-textarea__inner {
+  border-radius: 6px;
+}
+
+.el-menu {
+  border: none !important;
+}
+
+.el-header,
+.el-main,
+.el-footer {
+  padding: 0 !important;
+}
+
+.el-pagination {
+  --el-pagination-button-bg-color: transparent;
+  font-family: var(--sans);
+}

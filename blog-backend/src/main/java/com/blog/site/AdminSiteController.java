@@ -1,6 +1,6 @@
 package com.blog.site;
 
-import com.blog.site.dto.SiteProfileResponse;
+import com.blog.site.dto.AdminSiteProfileResponse;
 import com.blog.site.dto.UpdateSiteProfileRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,12 +19,12 @@ public class AdminSiteController {
     }
 
     @GetMapping
-    public SiteProfileResponse getProfile() {
-        return siteProfileService.getProfile();
+    public AdminSiteProfileResponse getProfile() {
+        return siteProfileService.getAdminProfile();
     }
 
     @PutMapping
-    public SiteProfileResponse updateProfile(@Valid @RequestBody UpdateSiteProfileRequest request) {
+    public AdminSiteProfileResponse updateProfile(@Valid @RequestBody UpdateSiteProfileRequest request) {
         return siteProfileService.update(request);
     }
 }

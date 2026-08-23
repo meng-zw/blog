@@ -262,7 +262,7 @@ public class ToolService {
 
     private static AdminToolResponse adminDetail(Tool tool) {
         return new AdminToolResponse(tool.getId(), tool.getSlug(), tool.getName(), tool.getSummary(),
-                tool.getDescriptionMarkdown(), tool.getRenderedHtml(), tool.getOfficialUrl(), mediaUrl(tool.getCoverMedia()),
+                tool.getDescriptionMarkdown(), tool.getRenderedHtml(), tool.getOfficialUrl(), mediaUrl(tool.getCoverMedia()), mediaId(tool.getCoverMedia()),
                 category(tool.getCategory()), tags(tool.getTags()), tool.getStatus(), tool.isFeatured(), tool.getSortOrder(),
                 tool.getPublishedAt(), tool.getCreatedAt(), tool.getUpdatedAt());
     }
@@ -276,6 +276,8 @@ public class ToolService {
     private static String mediaUrl(MediaAsset media) {
         return media == null ? null : "/api/media/" + media.getStorageKey();
     }
+
+    private static Long mediaId(MediaAsset media) { return media == null ? null : media.getId(); }
 
     private static CategoryResponse category(Category category) {
         return category == null ? null : new CategoryResponse(category.getId(), category.getName(), category.getSlug(),

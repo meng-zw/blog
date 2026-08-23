@@ -35,8 +35,14 @@ public class AdminArticleController {
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int size,
             @RequestParam(required = false) ArticleStatus status,
-            @RequestParam(required = false) ContentType contentType) {
-        return articleService.listAdmin(page, size, status, contentType);
+            @RequestParam(required = false) ContentType contentType,
+            @RequestParam(required = false) String keyword) {
+        return articleService.listAdmin(page, size, status, contentType, keyword);
+    }
+
+    @GetMapping("/lookup")
+    public java.util.List<AdminArticleSummaryResponse> lookup(@RequestParam java.util.List<Long> ids) {
+        return articleService.lookupAdmin(ids);
     }
 
     @GetMapping("/{id}")

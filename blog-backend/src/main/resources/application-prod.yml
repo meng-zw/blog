@@ -16,6 +16,15 @@ server:
   servlet:
     session:
       cookie:
-        secure: true
+        secure: ${BLOG_SESSION_COOKIE_SECURE:true}
 blog:
   public-base-url: ${BLOG_PUBLIC_BASE_URL}
+management:
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health

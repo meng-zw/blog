@@ -14,6 +14,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 import java.util.List;
 import java.util.Optional;
@@ -23,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -45,6 +48,32 @@ class TopicServiceTest {
     private TopicMembershipManager topicMembershipManager;
     @InjectMocks
     private TopicService topicService;
+
+    @Test
+    void adminPageLoadsMembershipsInOneBulkQuery() {
+        Topic first = topic(1L), second = topic(2L);
+        when(topicRepository.findAdminPage(null, null, PageRequest.of(0, 20)))
+                .thenReturn(new PageImpl<>(List.of(first, second), PageRequest.of(0, 20), 2));
+        when(topicArticleRepository.findByTopicIdInOrderByTopicIdAscSortOrderAsc(List.of(1L, 2L)))
+                .thenReturn(List.of(topicArticle(1L, 11L, 0), topicArticle(2L, 22L, 0)));
+
+        var page = topicService.listAdmin(0, 20, null, null);
+
+        assertThat(page.items()).extracting(item -> item.articleIds()).containsExactly(List.of(11L), List.of(22L));
+        verify(topicArticleRepository).findByTopicIdInOrderByTopicIdAscSortOrderAsc(List.of(1L, 2L));
+        verify(topicArticleRepository, never()).findByTopicIdOrderBySortOrderAsc(anyLong());
+    }
+
+    @Test
+    void adminPageCombinesStatusKeywordPaginationAndBulkMemberships() {
+        var pageable = PageRequest.of(1, 20);
+        when(topicRepository.findAdminPage(TopicStatus.PUBLISHED, "效率", pageable))
+                .thenReturn(new PageImpl<>(List.of(topic(2L)), pageable, 21));
+        when(topicArticleRepository.findByTopicIdInOrderByTopicIdAscSortOrderAsc(List.of(2L))).thenReturn(List.of());
+        var result = topicService.listAdmin(1, 20, TopicStatus.PUBLISHED, "  效率  ");
+        assertThat(result.total()).isEqualTo(21);
+        verify(topicRepository).findAdminPage(TopicStatus.PUBLISHED, "效率", pageable);
+    }
 
     @Test
     void reorderStoresTheRequestedArticleOrderAsContiguousPositions() {
@@ -162,6 +191,35 @@ class TopicServiceTest {
 
         assertThat(detail.articles()).extracting(com.blog.article.dto.ArticleSummaryResponse::id)
                 .containsExactly(11L);
+        assertThat(detail.slug()).isEqualTo("java");
+    }
+
+    @Test
+    void publicTopicPageIsBoundedOrderedAndContainsOnlyPublicMetadata() {
+        Topic published = topic(7L);
+        published.setStatus(TopicStatus.PUBLISHED);
+        published.setSortOrder(4);
+        when(topicRepository.findPublishedPage(PageRequest.of(1, 2)))
+                .thenReturn(new PageImpl<>(List.of(published), PageRequest.of(1, 2), 5));
+
+        var page = topicService.listPublished(1, 2);
+
+        assertThat(page.page()).isEqualTo(1);
+        assertThat(page.size()).isEqualTo(2);
+        assertThat(page.total()).isEqualTo(5);
+        assertThat(page.items()).singleElement().satisfies(summary -> {
+            assertThat(summary.id()).isEqualTo(7L);
+            assertThat(summary.slug()).isEqualTo("java");
+        });
+        verify(topicRepository).findPublishedPage(PageRequest.of(1, 2));
+    }
+
+    @Test
+    void publicTopicPageRejectsOutOfRangePaginationBeforeRepositoryAccess() {
+        assertThatIllegalArgumentException().isThrownBy(() -> topicService.listPublished(-1, 20));
+        assertThatIllegalArgumentException().isThrownBy(() -> topicService.listPublished(0, 0));
+        assertThatIllegalArgumentException().isThrownBy(() -> topicService.listPublished(0, 51));
+        verify(topicRepository, never()).findPublishedPage(any());
     }
 
     @Test

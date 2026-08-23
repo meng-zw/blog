@@ -173,11 +173,22 @@ public class ArticleService {
     }
 
     public PageResponse<AdminArticleSummaryResponse> listAdmin(int page, int size, ArticleStatus status,
-                                                               ContentType contentType) {
+                                                               ContentType contentType, String keyword) {
         PageRequest pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Order.desc("updatedAt"), Sort.Order.desc("id")));
-        return PageResponse.from(articleRepository.findAdminPage(status, contentType, pageable)
+        return PageResponse.from(articleRepository.findAdminPage(status, contentType, blankToNull(keyword), pageable)
                 .map(ArticleService::adminSummary));
+    }
+
+    public List<AdminArticleSummaryResponse> lookupAdmin(List<Long> ids) {
+        if (ids == null || ids.isEmpty() || ids.size() > 50 || ids.stream().anyMatch(id -> id == null || id <= 0)
+                || new java.util.HashSet<>(ids).size() != ids.size()) {
+            throw new IllegalArgumentException("Between 1 and 50 unique positive article IDs are required");
+        }
+        var found = articleRepository.findAdminSummariesByIdIn(ids).stream()
+                .collect(java.util.stream.Collectors.toMap(Article::getId, java.util.function.Function.identity()));
+        if (found.size() != ids.size()) throw new ResourceNotFoundException("Article", "one or more requested IDs");
+        return ids.stream().map(found::get).map(ArticleService::adminSummary).toList();
     }
 
     public AdminArticleResponse findAdmin(long id) {
@@ -303,7 +314,7 @@ public class ArticleService {
     private static AdminArticleResponse adminDetail(Article article) {
         return new AdminArticleResponse(article.getId(), article.getSlug(), article.getTitle(), article.getSummary(),
                 article.getMarkdownContent(), article.getRenderedHtml(), article.getContentType(), article.getStatus(),
-                article.getPublishedAt(), article.getScheduledAt(), mediaUrl(article.getCoverMedia()),
+                article.getPublishedAt(), article.getScheduledAt(), mediaUrl(article.getCoverMedia()), mediaId(article.getCoverMedia()),
                 category(article.getCategory()), tags(article.getTags()), topic(article.getTopic()),
                 article.getSeoTitle(), article.getSeoDescription());
     }
@@ -319,6 +330,8 @@ public class ArticleService {
         return category == null ? null : new CategoryResponse(category.getId(), category.getName(), category.getSlug(),
                 category.getDescription(), category.getSortOrder(), category.getScope());
     }
+
+    private static Long mediaId(MediaAsset media) { return media == null ? null : media.getId(); }
 
     private static List<TagResponse> tags(Set<Tag> tags) {
         if (tags == null) {

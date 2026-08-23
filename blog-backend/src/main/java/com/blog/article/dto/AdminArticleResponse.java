@@ -11,7 +11,7 @@ import java.util.List;
 
 public record AdminArticleResponse(Long id, String slug, String title, String summary, String markdownContent,
                                    String renderedHtml, ContentType contentType, ArticleStatus status,
-                                   Instant publishedAt, Instant scheduledAt, String coverUrl,
+                                   Instant publishedAt, Instant scheduledAt, String coverUrl, Long coverMediaId,
                                    CategoryResponse category, List<TagResponse> tags, TopicResponse topic,
                                    String seoTitle, String seoDescription) {
 }

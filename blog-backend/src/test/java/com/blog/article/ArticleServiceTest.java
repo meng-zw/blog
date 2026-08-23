@@ -326,13 +326,33 @@ class ArticleServiceTest {
     void adminListIncludesWorkflowStateForDraftManagement() {
         Article draft = article(4L, ArticleStatus.SCHEDULED, ContentType.ARTICLE);
         draft.setScheduledAt(NOW.plusSeconds(3600));
-        when(articleRepository.findAdminPage(eq(ArticleStatus.SCHEDULED), eq(ContentType.ARTICLE),
+        when(articleRepository.findAdminPage(eq(ArticleStatus.SCHEDULED), eq(ContentType.ARTICLE), eq(null),
                 any(Pageable.class))).thenReturn(new PageImpl<>(List.of(draft)));
 
-        var result = articleService.listAdmin(0, 20, ArticleStatus.SCHEDULED, ContentType.ARTICLE);
+        var result = articleService.listAdmin(0, 20, ArticleStatus.SCHEDULED, ContentType.ARTICLE, null);
 
         assertThat(result.items().getFirst().status()).isEqualTo(ArticleStatus.SCHEDULED);
         assertThat(result.items().getFirst().scheduledAt()).isEqualTo(NOW.plusSeconds(3600));
+    }
+
+    @Test
+    void adminListPassesTrimmedKeywordAndKeepsDeterministicPaginationOrder() {
+        when(articleRepository.findAdminPage(eq(null), eq(ContentType.ARTICLE), eq("效率"), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(), org.springframework.data.domain.PageRequest.of(1, 20), 41));
+        var result = articleService.listAdmin(1, 20, null, ContentType.ARTICLE, "  效率  ");
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(articleRepository).findAdminPage(eq(null), eq(ContentType.ARTICLE), eq("效率"), pageable.capture());
+        assertThat(result.total()).isEqualTo(41);
+        assertThat(pageable.getValue().getSort().getOrderFor("updatedAt").isDescending()).isTrue();
+    }
+
+    @Test
+    void bulkLookupUsesOneRepositoryQueryAndPreservesRequestedOrder() {
+        when(articleRepository.findAdminSummariesByIdIn(List.of(21L, 3L)))
+                .thenReturn(List.of(article(3L, ArticleStatus.DRAFT, ContentType.ARTICLE), article(21L, ArticleStatus.DRAFT, ContentType.ARTICLE)));
+        assertThat(articleService.lookupAdmin(List.of(21L, 3L))).extracting(com.blog.article.dto.AdminArticleSummaryResponse::id)
+                .containsExactly(21L, 3L);
+        verify(articleRepository).findAdminSummariesByIdIn(List.of(21L, 3L));
     }
 
     private static ArticleWriteRequest request(String title, String markdown, Long coverId, Long categoryId,
