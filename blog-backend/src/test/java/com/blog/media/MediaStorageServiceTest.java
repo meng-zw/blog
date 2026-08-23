@@ -35,6 +35,12 @@ class MediaStorageServiceTest {
         assertThat(stored.getStorageKey()).matches("[0-9a-f-]{36}\\.png");
         assertThat(stored.getWidth()).isEqualTo(3);
         assertThat(stored.getHeight()).isEqualTo(2);
+        assertThat(stored.getProvider()).isEqualTo(StorageProvider.LOCAL);
+        assertThat(stored.getBucket()).isEmpty();
+        assertThat(stored.getStatus()).isEqualTo(MediaStatus.READY);
+        assertThat(stored.getPurpose()).isEqualTo(MediaPurpose.INLINE_IMAGE);
+        assertThat(stored.getConfirmedAt()).isEqualTo(stored.getCreatedAt());
+        assertThat(stored.getUpdatedAt()).isEqualTo(stored.getCreatedAt());
         assertThat(Files.readAllBytes(mediaDirectory.resolve(stored.getStorageKey()))).isEqualTo(png(3, 2));
     }
 

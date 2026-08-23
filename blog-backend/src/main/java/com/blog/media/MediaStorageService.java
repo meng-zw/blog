@@ -65,14 +65,21 @@ public class MediaStorageService {
         String storageKey = UUID.randomUUID() + "." + imageType.extension();
         Path destination = writeSafely(storageKey, bytes);
         try {
+            Instant now = Instant.now();
             MediaAsset asset = new MediaAsset();
+            asset.setProvider(StorageProvider.LOCAL);
+            asset.setBucket("");
             asset.setStorageKey(storageKey);
+            asset.setStatus(MediaStatus.READY);
+            asset.setPurpose(MediaPurpose.INLINE_IMAGE);
             asset.setOriginalFilename(filename);
             asset.setContentType(contentType);
             asset.setByteSize(bytes.length);
             asset.setWidth(image.getWidth());
             asset.setHeight(image.getHeight());
-            asset.setCreatedAt(Instant.now());
+            asset.setCreatedAt(now);
+            asset.setConfirmedAt(now);
+            asset.setUpdatedAt(now);
             return repository.save(asset);
         } catch (RuntimeException | Error exception) {
             deleteFinalizedFile(destination);
