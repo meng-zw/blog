@@ -6,4 +6,5 @@ import java.util.Optional;
 
 public interface MediaAssetRepository extends JpaRepository<MediaAsset, Long> {
     Optional<MediaAsset> findByStorageKey(String storageKey);
+    Optional<MediaAsset> findByIdAndUploadedById(Long id, Long uploadedById);
 }
