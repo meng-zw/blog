@@ -24,7 +24,7 @@ public class MediaAsset {
     @Column(nullable = false, length = 20)
     private StorageProvider provider;
 
-    @Column(length = 255)
+    @Column(nullable = false, length = 255)
     private String bucket;
 
     @Column(name = "storage_key", nullable = false, length = 500)

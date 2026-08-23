@@ -24,6 +24,7 @@ class MediaAssetMappingTest {
         assertStringEnum("status", "com.blog.media.MediaStatus");
         assertStringEnum("purpose", "com.blog.media.MediaPurpose");
         assertThat(field("bucket").getType()).isEqualTo(String.class);
+        assertThat(field("bucket").getAnnotation(Column.class).nullable()).isFalse();
         assertThat(field("etag").getType()).isEqualTo(String.class);
         assertThat(field("confirmedAt").getType()).isEqualTo(Instant.class);
         assertThat(field("updatedAt").getType()).isEqualTo(Instant.class);

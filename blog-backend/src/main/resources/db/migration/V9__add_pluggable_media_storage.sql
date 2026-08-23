@@ -9,6 +9,7 @@ ALTER TABLE media_asset
 
 UPDATE media_asset
 SET provider = 'LOCAL',
+    bucket = '',
     status = 'READY',
     purpose = 'INLINE_IMAGE',
     confirmed_at = created_at,
@@ -16,6 +17,7 @@ SET provider = 'LOCAL',
 
 ALTER TABLE media_asset
     MODIFY COLUMN provider VARCHAR(20) NOT NULL,
+    MODIFY COLUMN bucket VARCHAR(255) NOT NULL,
     MODIFY COLUMN status VARCHAR(20) NOT NULL,
     MODIFY COLUMN purpose VARCHAR(30) NOT NULL,
     MODIFY COLUMN updated_at DATETIME(6) NOT NULL,
