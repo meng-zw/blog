@@ -24,6 +24,7 @@ import java.util.Optional;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
@@ -107,6 +108,25 @@ class MediaControllerTest {
                 .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("max-age=31536000")))
                 .andExpect(header().doesNotExist("Location"))
                 .andExpect(header().doesNotExist("Content-Disposition"))
+                .andExpect(content().bytes(new byte[]{1, 2, 3}));
+
+        verify(mediaStorageService).findByStorageKey(storageKey);
+        verify(mediaStorageService).load(storageKey);
+    }
+
+    @Test
+    void legacyRouteReadsPurposePrefixedLocalKeys() throws Exception {
+        String storageKey = "inline-images/123e4567-e89b-12d3-a456-426614174000.png";
+        Path source = mediaDirectory.resolve("private-source.png");
+        Files.write(source, new byte[]{1, 2, 3});
+        MediaAsset asset = new MediaAsset();
+        asset.setStorageKey(storageKey);
+        asset.setContentType("image/png");
+        when(mediaStorageService.findByStorageKey(storageKey)).thenReturn(asset);
+        when(mediaStorageService.load(storageKey)).thenReturn(source);
+
+        mockMvc.perform(get("/api/media/" + storageKey).contextPath("/api"))
+                .andExpect(status().isOk())
                 .andExpect(content().bytes(new byte[]{1, 2, 3}));
     }
 }

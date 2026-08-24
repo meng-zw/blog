@@ -30,8 +30,11 @@ public class MediaController {
                 asset.getWidth(), asset.getHeight(), "/api/media/" + asset.getStorageKey()));
     }
 
-    @GetMapping("/media/{storageKey:.+}")
+    @GetMapping("/media/{*storageKey}")
     public ResponseEntity<FileSystemResource> download(@PathVariable String storageKey) {
+        if (storageKey.startsWith("/")) {
+            storageKey = storageKey.substring(1);
+        }
         MediaAsset asset = storageService.findByStorageKey(storageKey);
         Path path = storageService.load(storageKey);
         return ResponseEntity.ok()

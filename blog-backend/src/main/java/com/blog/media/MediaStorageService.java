@@ -1,51 +1,57 @@
 package com.blog.media;
 
+import com.blog.media.storage.LocalObjectStorage;
+import com.blog.media.storage.ObjectUploadRequest;
+import com.blog.media.storage.StoredObject;
 import com.blog.shared.error.ResourceNotFoundException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import javax.imageio.ImageIO;
-import javax.imageio.ImageReader;
-import javax.imageio.stream.ImageInputStream;
-import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.file.AtomicMoveNotSupportedException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
-import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Compatibility facade for legacy cover uploads and {@code /media/{storageKey}} reads.
+ * New media workflows will use the media application service rather than this immediate-upload facade.
+ */
 @Service
 public class MediaStorageService {
-    private static final Map<String, ImageType> ALLOWED_TYPES = Map.of(
-            "image/png", new ImageType("png", "png", new byte[][]{{(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}}),
-            "image/jpeg", new ImageType("jpg", "jpeg", new byte[][]{{(byte) 0xff, (byte) 0xd8, (byte) 0xff}}),
-            "image/gif", new ImageType("gif", "gif", new byte[][]{{'G', 'I', 'F', '8', '7', 'a'}, {'G', 'I', 'F', '8', '9', 'a'}}));
+    private static final Map<String, String> IMAGE_EXTENSIONS = Map.of(
+            "image/png", "png", "image/jpeg", "jpg", "image/gif", "gif");
 
     private final MediaAssetRepository repository;
-    private final MediaProperties properties;
+    private final MediaContentValidator contentValidator;
+    private final LocalObjectStorage localObjectStorage;
 
-    public MediaStorageService(MediaAssetRepository repository, MediaProperties properties) {
+    @Autowired
+    public MediaStorageService(MediaAssetRepository repository, MediaContentValidator contentValidator,
+                               LocalObjectStorage localObjectStorage) {
         this.repository = repository;
-        this.properties = properties;
+        this.contentValidator = contentValidator;
+        this.localObjectStorage = localObjectStorage;
     }
 
+    /** Kept for source compatibility with existing direct constructions. */
+    @Deprecated(since = "media-v2")
+    public MediaStorageService(MediaAssetRepository repository, MediaProperties properties) {
+        this(repository, new MediaContentValidator(properties), new LocalObjectStorage(properties));
+    }
+
+    /** Legacy immediate image upload; all local I/O delegates to {@link LocalObjectStorage}. */
+    @Deprecated(since = "media-v2")
     public MediaAsset store(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("An image file is required");
         }
-        String filename = validateFilename(file.getOriginalFilename());
-        String contentType = file.getContentType() == null ? "" : file.getContentType().toLowerCase(Locale.ROOT);
-        ImageType imageType = ALLOWED_TYPES.get(contentType);
-        if (imageType == null) {
-            throw new IllegalArgumentException("Only PNG, JPEG, or GIF uploads are allowed");
-        }
-        validateExtension(filename, imageType);
+        String filename = file.getOriginalFilename();
+        String contentType = normalizeContentType(file.getContentType());
+        contentValidator.validateDeclaration(MediaPurpose.INLINE_IMAGE, filename, contentType, file.getSize());
 
         byte[] bytes;
         try {
@@ -53,167 +59,70 @@ public class MediaStorageService {
         } catch (IOException exception) {
             throw new IllegalArgumentException("Unable to read uploaded image", exception);
         }
-        if (bytes.length > properties.getMaxBytes()) {
-            throw new IllegalArgumentException("Image must not exceed 5 MiB");
+        MediaContentValidator.ValidatedContent validated = contentValidator.validateStoredContent(
+                MediaPurpose.INLINE_IMAGE, contentType, new ByteArrayInputStream(bytes));
+        String storageKey = UUID.randomUUID() + "." + imageExtension(contentType);
+        StoredObject stored;
+        try {
+            stored = localObjectStorage.upload(new ObjectUploadRequest(storageKey, contentType, bytes.length),
+                    new ByteArrayInputStream(bytes));
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Unable to store uploaded image", exception);
         }
-        if (!hasAllowedSignature(bytes, imageType.signatures())) {
-            throw new IllegalArgumentException("Image signature does not match its declared type");
-        }
-        BufferedImage image = decode(bytes, imageType);
-        validateDimensions(image.getWidth(), image.getHeight());
 
-        String storageKey = UUID.randomUUID() + "." + imageType.extension();
-        Path destination = writeSafely(storageKey, bytes);
         try {
             Instant now = Instant.now();
             MediaAsset asset = new MediaAsset();
             asset.setProvider(StorageProvider.LOCAL);
             asset.setBucket("");
-            asset.setStorageKey(storageKey);
+            asset.setStorageKey(stored.key());
             asset.setStatus(MediaStatus.READY);
             asset.setPurpose(MediaPurpose.INLINE_IMAGE);
             asset.setOriginalFilename(filename);
-            asset.setContentType(contentType);
-            asset.setByteSize(bytes.length);
-            asset.setWidth(image.getWidth());
-            asset.setHeight(image.getHeight());
+            asset.setContentType(stored.contentType());
+            asset.setByteSize(stored.byteSize());
+            asset.setWidth(validated.width());
+            asset.setHeight(validated.height());
+            asset.setEtag(stored.etag());
             asset.setCreatedAt(now);
             asset.setConfirmedAt(now);
             asset.setUpdatedAt(now);
             return repository.save(asset);
         } catch (RuntimeException | Error exception) {
-            deleteFinalizedFile(destination);
+            try {
+                localObjectStorage.delete(storageKey);
+            } catch (IOException ignored) {
+                // Preserve the database failure while making a best-effort object cleanup.
+            }
             throw exception;
         }
     }
 
+    @Deprecated(since = "media-v2")
     public Path load(String storageKey) {
-        if (storageKey == null || !storageKey.matches("[0-9a-f-]{36}\\.(png|jpg|gif)")) {
-            throw new ResourceNotFoundException("Media asset", storageKey == null ? "unknown" : storageKey);
-        }
-        Path root = storageRoot();
-        Path path = root.resolve(storageKey).normalize();
-        if (!path.startsWith(root) || !Files.isRegularFile(path)) {
-            throw new ResourceNotFoundException("Media asset", storageKey);
-        }
-        return path;
+        return localObjectStorage.loadPath(storageKey);
     }
 
+    @Deprecated(since = "media-v2")
     public MediaAsset findByStorageKey(String storageKey) {
         return repository.findByStorageKey(storageKey)
                 .orElseThrow(() -> new ResourceNotFoundException("Media asset", storageKey));
     }
 
-    private String validateFilename(String filename) {
-        if (filename == null || filename.isBlank() || filename.contains("/") || filename.contains("\\")
-                || filename.contains("..")) {
-            throw new IllegalArgumentException("Invalid filename");
+    private static String normalizeContentType(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            throw new IllegalArgumentException("Content type is required");
         }
-        return filename;
+        int parameters = contentType.indexOf(';');
+        return contentType.substring(0, parameters < 0 ? contentType.length() : parameters)
+                .trim().toLowerCase(Locale.ROOT);
     }
 
-    private static void validateExtension(String filename, ImageType type) {
-        int dot = filename.lastIndexOf('.');
-        String extension = dot < 1 ? "" : filename.substring(dot + 1).toLowerCase(Locale.ROOT);
-        boolean jpegExtension = type.extension().equals("jpg") && extension.equals("jpeg");
-        if (!extension.equals(type.extension()) && !jpegExtension) {
-            throw new IllegalArgumentException("Filename extension does not match content type");
+    private static String imageExtension(String contentType) {
+        String extension = IMAGE_EXTENSIONS.get(contentType);
+        if (extension == null) {
+            throw new IllegalArgumentException("Only PNG, JPEG, or GIF uploads are allowed");
         }
-    }
-
-    private static boolean hasAllowedSignature(byte[] bytes, byte[][] signatures) {
-        for (byte[] signature : signatures) {
-            if (bytes.length >= signature.length) {
-                boolean matches = true;
-                for (int index = 0; index < signature.length; index++) {
-                    if (bytes[index] != signature[index]) {
-                        matches = false;
-                        break;
-                    }
-                }
-                if (matches) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private BufferedImage decode(byte[] bytes, ImageType expectedType) {
-        try (ImageInputStream input = ImageIO.createImageInputStream(new ByteArrayInputStream(bytes))) {
-            if (input == null) {
-                throw new IllegalArgumentException("Image cannot be decoded");
-            }
-            Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
-            if (!readers.hasNext()) {
-                throw new IllegalArgumentException("Image cannot be decoded");
-            }
-            ImageReader reader = readers.next();
-            try {
-                if (!reader.getFormatName().equalsIgnoreCase(expectedType.imageIoFormat())) {
-                    throw new IllegalArgumentException("Image format does not match its declared type");
-                }
-                reader.setInput(input, true, true);
-                int declaredWidth = reader.getWidth(0);
-                int declaredHeight = reader.getHeight(0);
-                validateDimensions(declaredWidth, declaredHeight);
-                BufferedImage image = reader.read(0);
-                if (image == null) {
-                    throw new IllegalArgumentException("Image cannot be decoded");
-                }
-                validateDimensions(image.getWidth(), image.getHeight());
-                return image;
-            } finally {
-                reader.dispose();
-            }
-        } catch (IOException exception) {
-            throw new IllegalArgumentException("Image cannot be decoded", exception);
-        }
-    }
-
-    private Path writeSafely(String storageKey, byte[] bytes) {
-        Path root = storageRoot();
-        Path destination = root.resolve(storageKey).normalize();
-        if (!destination.startsWith(root)) {
-            throw new IllegalArgumentException("Invalid storage key");
-        }
-        try {
-            Files.createDirectories(root);
-            Path temporary = Files.createTempFile(root, ".upload-", ".tmp");
-            try {
-                Files.write(temporary, bytes);
-                try {
-                    Files.move(temporary, destination, StandardCopyOption.ATOMIC_MOVE);
-                } catch (AtomicMoveNotSupportedException ignored) {
-                    Files.move(temporary, destination, StandardCopyOption.REPLACE_EXISTING);
-                }
-            } finally {
-                Files.deleteIfExists(temporary);
-            }
-            return destination;
-        } catch (IOException exception) {
-            throw new IllegalArgumentException("Unable to store uploaded image", exception);
-        }
-    }
-
-    private void validateDimensions(int width, int height) {
-        if (width <= 0 || height <= 0 || width > properties.getMaxDimension() || height > properties.getMaxDimension()) {
-            throw new IllegalArgumentException("Image dimensions must not exceed 6000 pixels");
-        }
-    }
-
-    private static void deleteFinalizedFile(Path destination) {
-        try {
-            Files.deleteIfExists(destination);
-        } catch (IOException ignored) {
-            // Preserve the persistence exception while making a best-effort cleanup of the finalized media file.
-        }
-    }
-
-    private Path storageRoot() {
-        return properties.getDirectory().toAbsolutePath().normalize();
-    }
-
-    private record ImageType(String extension, String imageIoFormat, byte[][] signatures) {
+        return extension;
     }
 }

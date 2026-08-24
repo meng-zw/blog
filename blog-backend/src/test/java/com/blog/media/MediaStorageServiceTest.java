@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.mock.web.MockMultipartFile;
 
+import java.io.ByteArrayInputStream;
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
@@ -16,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MediaStorageServiceTest {
@@ -158,6 +160,40 @@ class MediaStorageServiceTest {
         assertThatIllegalArgumentException().isThrownBy(() -> service.store(new MockMultipartFile(
                 "file", "../portrait.png", "image/png", png(1, 1))))
                 .withMessageContaining("filename");
+    }
+
+    @Test
+    void delegatesLegacyUploadToLocalObjectStorage() throws Exception {
+        MediaAssetRepository repository = savingRepository();
+        MediaProperties properties = properties();
+        com.blog.media.storage.LocalObjectStorage storage = mock(com.blog.media.storage.LocalObjectStorage.class);
+        byte[] bytes = png(3, 2);
+        when(storage.upload(any(com.blog.media.storage.ObjectUploadRequest.class), any(ByteArrayInputStream.class)))
+                .thenAnswer(invocation -> {
+                    com.blog.media.storage.ObjectUploadRequest request = invocation.getArgument(0);
+                    return new com.blog.media.storage.StoredObject(request.objectKey(), request.contentType(),
+                            request.byteSize(), "etag");
+                });
+        MediaStorageService service = new MediaStorageService(repository, new MediaContentValidator(properties), storage);
+
+        service.store(new MockMultipartFile("file", "portrait.png", "image/png", bytes));
+
+        verify(storage).upload(any(com.blog.media.storage.ObjectUploadRequest.class), any(ByteArrayInputStream.class));
+    }
+
+    @Test
+    void delegatesLegacyReadsToLocalObjectStorage() {
+        MediaProperties properties = properties();
+        com.blog.media.storage.LocalObjectStorage storage = mock(com.blog.media.storage.LocalObjectStorage.class);
+        String key = "123e4567-e89b-12d3-a456-426614174000.png";
+        Path expected = mediaDirectory.resolve(key);
+        when(storage.loadPath(key)).thenReturn(expected);
+        MediaStorageService service = new MediaStorageService(mock(MediaAssetRepository.class),
+                new MediaContentValidator(properties), storage);
+
+        assertThat(service.load(key)).isEqualTo(expected);
+
+        verify(storage).loadPath(key);
     }
 
     private MediaProperties properties() {
