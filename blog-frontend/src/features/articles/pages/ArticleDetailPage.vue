@@ -19,6 +19,7 @@
         <ArticleToc :items="prepared.toc" />
         <SafeRichContent :html="prepared.html" />
       </div>
+      <section v-if="article.attachments.length" class="article-attachments" aria-label="文章附件"><h2>文章附件</h2><ul><li v-for="attachment in article.attachments" :key="attachment.mediaId"><div><strong>{{ attachment.displayName }}</strong><small>{{ formatFileSize(attachment.byteSize) }} · {{ attachment.contentType }}</small></div><a :href="attachment.downloadUrl" :download="attachment.displayName" :aria-label="`下载附件：${attachment.displayName}`">下载</a></li></ul></section>
       <nav v-if="article.previous || article.next" class="adjacent-nav" aria-label="相邻文章">
         <RouterLink v-if="article.previous" :to="`/articles/${article.previous.slug}`"><span>上一篇</span>{{ article.previous.title }}</RouterLink>
         <span v-else></span>
@@ -53,6 +54,12 @@ const errorDetail = computed(() => error.value?.traceId ? `${error.value.detail}
 function requestArticle(): Promise<void> {
   article.value = null
   return request.run((signal) => loadArticle(slug.value, signal))
+}
+
+function formatFileSize(byteSize: number): string {
+  if (byteSize < 1024) return `${byteSize} B`
+  if (byteSize < 1024 * 1024) return `${(byteSize / 1024).toFixed(1)} KiB`
+  return `${(byteSize / (1024 * 1024)).toFixed(1)} MiB`
 }
 
 useSeo(() => {

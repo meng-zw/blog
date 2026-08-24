@@ -182,6 +182,15 @@ export interface ArticleDetailResponse extends ArticleSummaryResponse {
   seoDescription: string | null
   previous: ArticleSummaryResponse | null
   next: ArticleSummaryResponse | null
+  attachments: ArticleAttachmentResponse[]
+}
+
+export interface ArticleAttachmentResponse {
+  mediaId: number
+  displayName: string
+  contentType: string
+  byteSize: number
+  downloadUrl: string
 }
 
 export interface ArticleWriteRequest {
@@ -196,6 +205,7 @@ export interface ArticleWriteRequest {
   tagIds: number[]
   seoTitle: string | null
   seoDescription: string | null
+  attachmentMediaIds: number[]
 }
 
 export interface ScheduleArticleRequest {
@@ -223,6 +233,7 @@ export interface AdminArticleResponse extends AdminArticleSummaryResponse {
   topic: TopicResponse | null
   seoTitle: string | null
   seoDescription: string | null
+  attachments: ArticleAttachmentResponse[]
 }
 
 export interface ToolSummaryResponse {

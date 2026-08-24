@@ -25,6 +25,7 @@ const article: ArticleDetailResponse = {
   renderedHtml: '<h2>找到节奏</h2><p>正文 <a href="https://outside.example">参考</a></p><h2>继续前行</h2>',
   seoTitle: '缓慢而稳定地工作',
   seoDescription: '稳定工作的方法',
+  attachments: [],
   previous: { id: 6, slug: 'before', title: '上一篇', summary: '前文', contentType: 'ARTICLE', publishedAt: '2026-08-19T08:00:00Z', coverUrl: null, category: null, tags: [] },
   next: { id: 8, slug: 'after', title: '下一篇', summary: '后文', contentType: 'ARTICLE', publishedAt: '2026-08-21T08:00:00Z', coverUrl: null, category: null, tags: [] }
 }
@@ -63,6 +64,25 @@ describe('article detail page', () => {
     expect(wrapper.get('a[href="/topics/work-methods"]').text()).toContain('工作方法')
     expect(wrapper.get('a[href="/articles/before"]').text()).toContain('上一篇')
     expect(wrapper.get('a[href="/articles/after"]').text()).toContain('下一篇')
+  })
+
+  it('omits attachments when there are none and renders public download metadata when present', async () => {
+    mockedLoadArticle.mockResolvedValueOnce(article).mockResolvedValueOnce({
+      ...article,
+      attachments: [{ mediaId: 15, displayName: '效率工具包.zip', contentType: 'application/zip', byteSize: 1_572_864, downloadUrl: '/api/media/assets/15/download' }]
+    })
+    const first = await mountPage()
+    await flushPromises()
+    expect(first.wrapper.find('section[aria-label="文章附件"]').exists()).toBe(false)
+    first.wrapper.unmount()
+
+    const second = await mountPage()
+    await flushPromises()
+    const section = second.wrapper.get('section[aria-label="文章附件"]')
+    expect(section.text()).toContain('效率工具包.zip')
+    expect(section.text()).toContain('1.5 MiB')
+    expect(section.text()).toContain('application/zip')
+    expect(section.get('a').attributes()).toMatchObject({ href: '/api/media/assets/15/download', download: '效率工具包.zip', 'aria-label': '下载附件：效率工具包.zip' })
   })
 
   it('sets canonical, Open Graph and a single Article JSON-LD record', async () => {
