@@ -150,7 +150,7 @@ public class MediaApplicationService {
 
     @Transactional
     public void delete(long mediaId, String username) {
-        MediaAsset asset = ownedAsset(mediaId, username);
+        MediaAsset asset = ownedAssetForDeletion(mediaId, username);
         if (asset.getStatus() == MediaStatus.DELETED) {
             return;
         }
@@ -173,11 +173,12 @@ public class MediaApplicationService {
     @Transactional(readOnly = true)
     public PageResponse<AdminMediaAssetResponse> list(int page, int size, MediaStatus status, MediaPurpose purpose) {
         if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("Page size must be between 1 and 100");
-        return PageResponse.from(mediaRepository.findAdminPage(status, purpose,
-                PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))))
-                .map(asset -> new AdminMediaAssetResponse(asset.getId(), asset.getOriginalFilename(), asset.getContentType(),
+        var assets = mediaRepository.findAdminPage(status, purpose,
+                PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))));
+        var referencedIds = referenceChecker.referencedIds(assets.getContent().stream().map(MediaAsset::getId).toList());
+        return PageResponse.from(assets.map(asset -> new AdminMediaAssetResponse(asset.getId(), asset.getOriginalFilename(), asset.getContentType(),
                         asset.getByteSize(), asset.getWidth(), asset.getHeight(), asset.getProvider(), asset.getStatus(),
-                        asset.getPurpose(), referenceChecker.isReferenced(asset.getId()), stableUrl(asset), asset.getCreatedAt())));
+                        asset.getPurpose(), referencedIds.contains(asset.getId()), stableUrl(asset), asset.getCreatedAt())));
     }
 
     @Transactional(readOnly = true)
@@ -263,6 +264,12 @@ public class MediaApplicationService {
     private MediaAsset ownedAsset(long mediaId, String username) {
         AdminAccount administrator = currentAdministrator(username);
         return mediaRepository.findByIdAndUploadedById(mediaId, administrator.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Media asset", Long.toString(mediaId)));
+    }
+
+    private MediaAsset ownedAssetForDeletion(long mediaId, String username) {
+        AdminAccount administrator = currentAdministrator(username);
+        return mediaRepository.lockById(mediaId).filter(asset -> administrator.getId().equals(asset.getUploadedById()))
                 .orElseThrow(() -> new ResourceNotFoundException("Media asset", Long.toString(mediaId)));
     }
 

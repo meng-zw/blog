@@ -95,6 +95,7 @@ public class ArticleService {
         Article article = new Article();
         article.setSlug(allocateCreateSlug(input));
         article.setStatus(ArticleStatus.DRAFT);
+        articleMediaReferenceService.lockForAssignment(request.coverMediaId(), request.markdownContent(), request.attachmentMediaIds());
         apply(article, request, input, true);
         Article saved = articleRepository.save(article);
         topicMembershipManager.synchronizeArticle(saved);
@@ -111,6 +112,7 @@ public class ArticleService {
             throw new ConflictException("Archived content cannot be edited");
         }
         updateExplicitSlug(article, input.slug());
+        articleMediaReferenceService.lockForAssignment(request.coverMediaId(), request.markdownContent(), request.attachmentMediaIds());
         apply(article, request, input, !request.markdownContent().equals(article.getMarkdownContent()));
         Article saved = articleRepository.save(article);
         topicMembershipManager.synchronizeArticle(saved);
@@ -240,7 +242,7 @@ public class ArticleService {
         if (id == null) {
             return null;
         }
-        MediaAsset media = mediaAssetRepository.findById(id)
+        MediaAsset media = mediaAssetRepository.lockById(id).or(() -> mediaAssetRepository.findById(id))
                 .orElseThrow(() -> new ResourceNotFoundException("Cover media asset", id.toString()));
         if (media.getContentType() == null || !media.getContentType().toLowerCase(Locale.ROOT).startsWith("image/")) {
             throw new IllegalArgumentException("Cover media must be an image");

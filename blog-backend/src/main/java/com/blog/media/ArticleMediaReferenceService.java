@@ -59,6 +59,7 @@ public class ArticleMediaReferenceService {
         }
         List<Long> inlineMediaIds = extractInlineMediaIds(markdown);
         List<Long> attachments = normalizedAttachmentIds(attachmentMediaIds);
+        lockForAssignment(null, markdown, attachments);
         List<MediaAsset> inline = inlineMediaIds.stream()
                 .map(id -> requireReady(id, MediaPurpose.INLINE_IMAGE, "Inline media"))
                 .toList();
@@ -81,12 +82,22 @@ public class ArticleMediaReferenceService {
         }
     }
 
+    /** Locks all media selected by an article in ascending ID order before any reference is written. */
+    public void lockForAssignment(Long coverMediaId, String markdown, List<Long> attachmentMediaIds) {
+        List<Long> attachments = normalizedAttachmentIds(attachmentMediaIds);
+        java.util.stream.Stream.concat(java.util.stream.Stream.concat(
+                        coverMediaId == null ? java.util.stream.Stream.empty() : java.util.stream.Stream.of(coverMediaId),
+                        extractInlineMediaIds(markdown).stream()), attachments.stream())
+                .distinct().sorted().forEach(id -> mediaAssetRepository.lockById(id).or(() -> mediaAssetRepository.findById(id))
+                        .orElseThrow(() -> new ResourceNotFoundException("Media asset", Long.toString(id))));
+    }
+
     public List<ArticleMedia> attachmentsFor(long articleId) {
         return articleMediaRepository.findByArticle_IdAndId_RoleOrderBySortOrderAsc(articleId, ArticleMediaRole.ATTACHMENT);
     }
 
     private MediaAsset requireReady(Long id, MediaPurpose expectedPurpose, String label) {
-        MediaAsset asset = mediaAssetRepository.findById(id)
+        MediaAsset asset = mediaAssetRepository.lockById(id).or(() -> mediaAssetRepository.findById(id))
                 .orElseThrow(() -> new ResourceNotFoundException("Media asset", Long.toString(id)));
         if (asset.getStatus() != MediaStatus.READY) {
             throw new IllegalArgumentException(label + " must be READY");

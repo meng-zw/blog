@@ -52,7 +52,7 @@ public class SiteProfileService {
 
     private MediaAsset requireAvatar(Long id, MediaAsset existing) {
         if (id == null) return null;
-        MediaAsset media = mediaAssetRepository.findById(id)
+        MediaAsset media = mediaAssetRepository.lockById(id).or(() -> mediaAssetRepository.findById(id))
                 .orElseThrow(() -> new ResourceNotFoundException("Avatar media asset", id.toString()));
         if (media.getContentType() == null || !media.getContentType().toLowerCase(java.util.Locale.ROOT).startsWith("image/")) {
             throw new IllegalArgumentException("Avatar media must be an image");

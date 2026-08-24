@@ -12,6 +12,7 @@ import com.blog.tool.ToolStatus;
 import com.blog.topic.Topic;
 import com.blog.topic.TopicRepository;
 import com.blog.topic.TopicStatus;
+import com.blog.media.MediaAsset;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -55,7 +56,7 @@ class HomeQueryIntegrationTest {
         when(toolRepository.findVisibleFeaturedSummariesByIdIn(List.of(2L, 1L), NOW))
                 .thenReturn(List.of(tool(1), tool(2)));
         when(topicRepository.findPublishedForHome(eq(TopicStatus.PUBLISHED), any(Pageable.class)))
-                .thenReturn(List.of(topic(3), topic(4)));
+                .thenReturn(List.of(topicWithCover(3), topic(4)));
 
         HomeResponse result = service().getHome();
 
@@ -66,6 +67,7 @@ class HomeQueryIntegrationTest {
                 .containsOnly(ContentType.ARTICLE);
         assertThat(result.featuredTools()).extracting(item -> item.id()).containsExactly(2L, 1L);
         assertThat(result.topics()).extracting(item -> item.id()).containsExactly(3L, 4L);
+        assertThat(result.topics().getFirst().coverUrl()).isEqualTo("/api/media/assets/31");
 
         ArgumentCaptor<Pageable> articleLimits = ArgumentCaptor.forClass(Pageable.class);
         verify(articleRepository).findNewestVisibleArticleIds(eq(NOW), articleLimits.capture());
@@ -153,6 +155,15 @@ class HomeQueryIntegrationTest {
         topic.setDescription("Description " + id);
         topic.setStatus(TopicStatus.PUBLISHED);
         topic.setSortOrder((int) id);
+        return topic;
+    }
+
+    private static Topic topicWithCover(long id) {
+        Topic topic = topic(id);
+        MediaAsset cover = new MediaAsset();
+        cover.setId(31L);
+        cover.setStorageKey("ignored-by-stable-url.png");
+        topic.setCoverMedia(cover);
         return topic;
     }
 }

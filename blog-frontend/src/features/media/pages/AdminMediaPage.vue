@@ -4,7 +4,7 @@
     <div class="admin-card media-toolbar">
       <label>状态<select v-model="status" @change="load"><option value="">全部</option><option v-for="value in statuses" :key="value">{{ value }}</option></select></label>
       <label>用途<select v-model="purpose" @change="load"><option value="">全部</option><option v-for="value in purposes" :key="value">{{ value }}</option></select></label>
-      <label class="media-dropzone"><strong>{{ uploading ? `正在上传 ${progress}%` : '上传图片' }}</strong><input type="file" :accept="ACCEPTED_IMAGE_TYPES" :disabled="uploading" @change="chooseFile"></label>
+      <label class="media-dropzone"><strong aria-live="polite">{{ uploading ? `正在上传 ${progress}%` : '上传图片' }}</strong><input type="file" :accept="ACCEPTED_IMAGE_TYPES" :disabled="uploading" @change="chooseFile"></label>
     </div>
     <p v-if="errorMessage" class="admin-alert admin-alert--error" role="alert">{{ errorMessage }}</p>
     <p v-if="loading" role="status">正在读取媒体库…</p>

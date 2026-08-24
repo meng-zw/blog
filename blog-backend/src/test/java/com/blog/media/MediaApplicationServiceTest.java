@@ -23,6 +23,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
+import java.util.List;
+import java.util.Set;
 import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -237,7 +239,7 @@ class MediaApplicationServiceTest {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
         MediaAsset asset = pendingAsset(42L, 7L);
         asset.setStatus(MediaStatus.READY);
-        when(fixture.mediaRepository.findByIdAndUploadedById(42L, 7L)).thenReturn(Optional.of(asset));
+        when(fixture.mediaRepository.lockById(42L)).thenReturn(Optional.of(asset));
         when(fixture.referenceChecker.isReferenced(42L)).thenReturn(true);
 
         assertThatThrownBy(() -> fixture.service.delete(42L, "owner"))
@@ -245,6 +247,22 @@ class MediaApplicationServiceTest {
                 .hasMessageContaining("referenced");
 
         verify(fixture.storage, never()).delete(any());
+    }
+
+    @Test
+    void listsReferenceStateWithOneBulkLookupInsteadOfOneCheckPerAsset() {
+        Fixture fixture = fixture(StorageProvider.LOCAL, false);
+        MediaAsset first = pendingAsset(1L, 7L); first.setStatus(MediaStatus.READY);
+        MediaAsset second = pendingAsset(2L, 7L); second.setStatus(MediaStatus.READY);
+        when(fixture.mediaRepository.findAdminPage(eq(null), eq(null), any())).thenReturn(
+                new org.springframework.data.domain.PageImpl<>(List.of(first, second)));
+        when(fixture.referenceChecker.referencedIds(List.of(1L, 2L))).thenReturn(Set.of(2L));
+
+        var page = fixture.service.list(0, 24, null, null);
+
+        assertThat(page.items()).extracting(item -> item.referenced()).containsExactly(false, true);
+        verify(fixture.referenceChecker).referencedIds(List.of(1L, 2L));
+        verify(fixture.referenceChecker, never()).isReferenced(any(Long.class));
     }
 
     private Fixture fixture(StorageProvider provider, boolean directUpload) {

@@ -5,6 +5,7 @@ import com.blog.article.ArticleRepository;
 import com.blog.article.ArticleService;
 import com.blog.article.dto.ArticleSummaryResponse;
 import com.blog.media.MediaAsset;
+import com.blog.media.MediaApplicationService;
 import com.blog.site.dto.HomeResponse;
 import com.blog.tool.Tool;
 import com.blog.tool.ToolRepository;
@@ -93,6 +94,6 @@ public class HomeQueryService {
     private static PublicTopicSummaryResponse topicSummary(Topic topic) {
         MediaAsset cover = topic.getCoverMedia();
         return new PublicTopicSummaryResponse(topic.getId(), topic.getName(), topic.getSlug(), topic.getDescription(),
-                cover == null ? null : "/api/media/" + cover.getStorageKey());
+                MediaApplicationService.stableUrl(cover));
     }
 }
