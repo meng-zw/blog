@@ -52,6 +52,7 @@ class MediaApplicationServiceTest {
         assertThat(plan.uploadUrl()).isEqualTo("/api/admin/media/uploads/42/content");
         assertThat(plan.headers()).containsEntry("Content-Type", "image/png");
         assertThat(fixture.saved.getStatus()).isEqualTo(MediaStatus.PENDING_UPLOAD);
+        assertThat(fixture.saved.getBucket()).isEmpty();
         assertThat(fixture.saved.getUploadedById()).isEqualTo(7L);
         assertThat(fixture.saved.getStorageKey()).matches("inline-images/[0-9a-f-]{36}\\.png");
     }
@@ -59,7 +60,7 @@ class MediaApplicationServiceTest {
     @Test
     void returnsProviderDirectUploadTicketWithoutExposingObjectKey() {
         Fixture fixture = fixture(StorageProvider.R2, true);
-        when(fixture.storage.createDirectUpload(any())).thenReturn(new UploadTicket(UploadMode.DIRECT, "PUT",
+        when(fixture.storage.createDirectUpload(any(), any())).thenReturn(new UploadTicket(UploadMode.DIRECT, "PUT",
                 URI.create("https://r2.example/upload"), Map.of("Content-Type", "image/png"), NOW.plusSeconds(600)));
 
         MediaUploadPlanResponse plan = fixture.service.requestUpload(
@@ -82,7 +83,7 @@ class MediaApplicationServiceTest {
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("Media asset not found");
 
-        verify(fixture.storage, never()).upload(any(), any());
+        verify(fixture.storage, never()).upload(any(), any(), any());
     }
 
     @Test
@@ -91,9 +92,9 @@ class MediaApplicationServiceTest {
         MediaAsset asset = pendingAsset(42L, 7L);
         when(fixture.mediaRepository.findByIdAndUploadedById(42L, 7L)).thenReturn(Optional.of(asset));
         byte[] bytes = png();
-        when(fixture.storage.inspect(asset.getStorageKey())).thenReturn(
+        when(fixture.storage.inspect(location(asset))).thenReturn(
                 new StoredObject(asset.getStorageKey(), "image/png", bytes.length, "etag-1"));
-        when(fixture.storage.openStream(asset.getStorageKey())).thenReturn(new ByteArrayInputStream(bytes));
+        when(fixture.storage.openStream(location(asset))).thenReturn(new ByteArrayInputStream(bytes));
 
         MediaResponse response = fixture.service.complete(42L, "owner");
 
@@ -108,14 +109,14 @@ class MediaApplicationServiceTest {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
         MediaAsset asset = pendingAsset(42L, 7L);
         when(fixture.mediaRepository.findByIdAndUploadedById(42L, 7L)).thenReturn(Optional.of(asset));
-        when(fixture.storage.inspect(asset.getStorageKey())).thenReturn(
+        when(fixture.storage.inspect(location(asset))).thenReturn(
                 new StoredObject(asset.getStorageKey(), "image/png", 3, "etag-1"));
-        when(fixture.storage.openStream(asset.getStorageKey())).thenReturn(new ByteArrayInputStream(new byte[]{1, 2, 3}));
+        when(fixture.storage.openStream(location(asset))).thenReturn(new ByteArrayInputStream(new byte[]{1, 2, 3}));
 
         assertThatIllegalArgumentException().isThrownBy(() -> fixture.service.complete(42L, "owner"));
 
         assertThat(asset.getStatus()).isEqualTo(MediaStatus.FAILED);
-        verify(fixture.storage).delete(asset.getStorageKey());
+        verify(fixture.storage).delete(location(asset));
     }
 
     @Test
@@ -123,7 +124,7 @@ class MediaApplicationServiceTest {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
         MediaAsset asset = pendingAsset(42L, 7L);
         when(fixture.mediaRepository.findByIdAndUploadedById(42L, 7L)).thenReturn(Optional.of(asset));
-        when(fixture.storage.inspect(asset.getStorageKey()))
+        when(fixture.storage.inspect(location(asset)))
                 .thenThrow(new ResourceNotFoundException("Media object", asset.getStorageKey()));
 
         assertThatIllegalArgumentException().isThrownBy(() -> fixture.service.complete(42L, "owner"));
@@ -152,9 +153,32 @@ class MediaApplicationServiceTest {
         MediaAsset asset = pendingAsset(42L, 7L);
         asset.setStatus(MediaStatus.READY);
         when(fixture.mediaRepository.findById(42L)).thenReturn(Optional.of(asset));
-        when(fixture.storage.resolvePublicUrl(asset.getStorageKey())).thenReturn(URI.create("https://cdn.example/asset.png"));
+        when(fixture.storage.resolvePublicUrl(location(asset))).thenReturn(URI.create("https://cdn.example/asset.png"));
 
         assertThat(fixture.service.resolvePublic(42L).location()).isEqualTo(URI.create("https://cdn.example/asset.png"));
+    }
+
+    @Test
+    void readsPersistedR2BucketWhenLocalIsTheDefaultForNewUploads() {
+        MediaAssetRepository mediaRepository = mock(MediaAssetRepository.class);
+        ObjectStorageRegistry registry = mock(ObjectStorageRegistry.class);
+        ObjectStorage r2 = mock(ObjectStorage.class);
+        MediaProperties properties = new MediaProperties();
+        properties.setProvider(StorageProvider.LOCAL);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        asset.setProvider(StorageProvider.R2);
+        asset.setBucket("archive-media");
+        asset.setStatus(MediaStatus.READY);
+        com.blog.media.storage.ObjectLocation persisted = location(asset);
+        when(mediaRepository.findById(42L)).thenReturn(Optional.of(asset));
+        when(registry.get(StorageProvider.R2)).thenReturn(r2);
+        when(r2.resolvePublicUrl(persisted)).thenReturn(URI.create("https://archive.example/asset.png"));
+        MediaApplicationService service = new MediaApplicationService(mediaRepository,
+                mock(AdminAccountRepository.class), registry, new MediaContentValidator(properties),
+                mock(MediaReferenceChecker.class), properties, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        assertThat(service.resolvePublic(42L).location()).hasToString("https://archive.example/asset.png");
+        verify(r2).resolvePublicUrl(persisted);
     }
 
     @Test
@@ -169,7 +193,7 @@ class MediaApplicationServiceTest {
         asset.setOriginalFilename("资料.pdf");
         asset.setStatus(MediaStatus.READY);
         when(fixture.mediaRepository.findById(42L)).thenReturn(Optional.of(asset));
-        when(fixture.storage.openStream(asset.getStorageKey())).thenReturn(new ByteArrayInputStream("pdf-bytes".getBytes()));
+        when(fixture.storage.openStream(location(asset))).thenReturn(new ByteArrayInputStream("pdf-bytes".getBytes()));
 
         MediaApplicationService.PublicMediaContent content = fixture.service.openPublicDownload(42L);
 
@@ -177,11 +201,11 @@ class MediaApplicationServiceTest {
         assertThat(content.filename()).isEqualTo("资料.pdf");
         assertThat(content.contentType()).isEqualTo("application/pdf");
         assertThat(content.byteSize()).isEqualTo(9L);
-        verify(fixture.storage, never()).resolvePublicUrl(asset.getStorageKey());
+        verify(fixture.storage, never()).resolvePublicUrl(location(asset));
     }
 
     @Test
-    void abandonsExpiredPendingUploadAndRemovesItsObject() throws Exception {
+    void marksExpiredPendingUploadTerminalAfterRemovingItsObject() throws Exception {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
         MediaAsset asset = pendingAsset(42L, 7L);
         asset.setCreatedAt(NOW.minusSeconds(24 * 60 * 60 + 1));
@@ -190,8 +214,8 @@ class MediaApplicationServiceTest {
 
         assertThat(fixture.service.abandonExpiredUploads()).isEqualTo(1);
 
-        assertThat(asset.getStatus()).isEqualTo(MediaStatus.ABANDONED);
-        verify(fixture.storage).delete(asset.getStorageKey());
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.DELETED);
+        verify(fixture.storage).delete(location(asset));
     }
 
     @Test
@@ -207,19 +231,21 @@ class MediaApplicationServiceTest {
         when(fixture.mediaRepository.findByStatusIn(java.util.List.of(MediaStatus.ABANDONED, MediaStatus.FAILED)))
                 .thenReturn(java.util.List.of(), java.util.List.of(abandoned));
         org.mockito.Mockito.doThrow(new IOException("offline")).doNothing()
-                .when(fixture.storage).delete(abandoned.getStorageKey());
+                .when(fixture.storage).delete(location(abandoned));
 
         fixture.service.abandonExpiredUploads();
-        fixture.service.abandonExpiredUploads();
-
         assertThat(abandoned.getStatus()).isEqualTo(MediaStatus.ABANDONED);
+        fixture.service.abandonExpiredUploads();
+        assertThat(abandoned.getStatus()).isEqualTo(MediaStatus.DELETED);
+        fixture.service.abandonExpiredUploads();
+
         assertThat(ready.getStatus()).isEqualTo(MediaStatus.READY);
-        verify(fixture.storage, org.mockito.Mockito.times(2)).delete(abandoned.getStorageKey());
-        verify(fixture.storage, never()).delete(ready.getStorageKey());
+        verify(fixture.storage, org.mockito.Mockito.times(2)).delete(location(abandoned));
+        verify(fixture.storage, never()).delete(location(ready));
     }
 
     @Test
-    void retriesFailedValidationObjectDeletionWithoutChangingFailedState() throws Exception {
+    void marksFailedValidationCleanupTerminalAfterObjectDeletion() throws Exception {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
         MediaAsset failed = pendingAsset(42L, 7L);
         failed.setStatus(MediaStatus.FAILED);
@@ -230,8 +256,8 @@ class MediaApplicationServiceTest {
 
         assertThat(fixture.service.abandonExpiredUploads()).isEqualTo(1);
 
-        assertThat(failed.getStatus()).isEqualTo(MediaStatus.FAILED);
-        verify(fixture.storage).delete(failed.getStorageKey());
+        assertThat(failed.getStatus()).isEqualTo(MediaStatus.DELETED);
+        verify(fixture.storage).delete(location(failed));
     }
 
     @Test
@@ -273,10 +299,11 @@ class MediaApplicationServiceTest {
         MediaReferenceChecker referenceChecker = mock(MediaReferenceChecker.class);
         MediaProperties properties = new MediaProperties();
         properties.setProvider(provider);
-        properties.setBucket(provider == StorageProvider.R2 ? "blog-media" : "");
         when(registry.get(provider)).thenReturn(storage);
         when(storage.capabilities()).thenReturn(new com.blog.media.storage.StorageCapabilities(directUpload, true));
         when(storage.provider()).thenReturn(provider);
+        when(storage.locationForNewObject(any())).thenAnswer(invocation -> new com.blog.media.storage.ObjectLocation(
+                provider, provider == StorageProvider.LOCAL ? "" : "blog-media", invocation.getArgument(0)));
         AdminAccount account = new AdminAccount();
         account.setId(7L);
         when(adminRepository.findByUsernameAndEnabledTrue("owner")).thenReturn(Optional.of(account));
@@ -313,6 +340,10 @@ class MediaApplicationServiceTest {
         asset.setCreatedAt(NOW);
         asset.setUpdatedAt(NOW);
         return asset;
+    }
+
+    private static com.blog.media.storage.ObjectLocation location(MediaAsset asset) {
+        return new com.blog.media.storage.ObjectLocation(asset.getProvider(), asset.getBucket(), asset.getStorageKey());
     }
 
     private static void copy(MediaAsset source, MediaAsset target) {

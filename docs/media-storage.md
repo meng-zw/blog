@@ -27,10 +27,25 @@ BLOG_MEDIA_R2_BUCKET=xiaom-blog-media
 # 留空时服务根据 account id 推导；显式填写便于审计。
 BLOG_MEDIA_R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
 BLOG_MEDIA_R2_PUBLIC_BASE_URL=https://img.example.com
+BLOG_MEDIA_R2_LEGACY_BUCKETS=
 BLOG_MEDIA_R2_UPLOAD_URL_TTL=10m
+# Nginx CSP：必须是精确 origin，不允许 *。应分别与上面的 endpoint、公共域 origin 一致。
+MEDIA_UPLOAD_ORIGIN=https://<account-id>.r2.cloudflarestorage.com
+MEDIA_PUBLIC_ORIGINS=https://img.example.com
 ```
 
 R2 provider 启动时会校验账户、Access Key、Secret、bucket 与 HTTPS 公共地址；故意不会让 Compose 在 Local 模式下要求这些变量。R2 固定使用 S3 区域 `auto` 和 path-style endpoint，因而没有 `BLOG_MEDIA_R2_REGION` 变量。凭据不会传给 Nginx/Web 容器、浏览器或前端构建；浏览器只会取得服务端签发、默认 10 分钟过期的单对象 PUT URL。
+
+`MEDIA_UPLOAD_ORIGIN` 与 `MEDIA_PUBLIC_ORIGINS` 只是注入 Nginx CSP 的非敏感 origin：前者填写 R2 S3 endpoint 的 origin，后者填写公共图片域 origin；多个公共域以空格分隔。不要填写 `*`。API 也会从 R2 配置生成同样的窄 CSP。启用 R2 后若遗漏这些 Web 变量，浏览器会阻止跨域 PUT 或重定向后的图片加载。
+
+新上传使用 `BLOG_MEDIA_PROVIDER` 指定的默认 provider；历史对象读取则始终按数据库中的 `(provider,bucket,storage_key)` 定位。因而切回 Local 作为默认上传方式后，只要仍保留 R2 凭据与可读桶配置，历史 R2 对象仍可访问。跨桶迁移期间可设置：
+
+```dotenv
+BLOG_MEDIA_R2_LEGACY_BUCKETS=old-media=https://old-img.example.com,archive-media=https://archive-img.example.com/blog
+MEDIA_PUBLIC_ORIGINS=https://img.example.com https://old-img.example.com https://archive-img.example.com
+```
+
+旧桶列表采用 `bucket=https://public-base`，逗号分隔；每个桶必须显式列出，同一组 R2 凭据也必须仍有这些桶的 Object Read/Delete 权限。未列出的持久化桶会被拒绝，避免悄悄从当前默认桶读取同名 key。
 
 ## 创建 R2 桶与公开域名
 
@@ -73,6 +88,8 @@ R2 provider 启动时会校验账户、Access Key、Secret、bucket 与 HTTPS �
 2. R2 时浏览器向预签名 URL 直接 `PUT`；Local 时浏览器带 Session/CSRF 向 `/api/admin/media/uploads/{id}/content` 上传。
 3. 浏览器调用 `POST /api/admin/media/{id}/complete`。服务验证对象并将媒体置为 `READY`。重复 complete 是幂等的。
 4. Vditor 插入 `![名称](/api/media/assets/{id})`。公开读该地址会 302 到该媒体当前 provider 的公开地址；公开附件下载使用 `/api/media/assets/{id}/download`，并强制下载响应。
+
+上传计划默认按“管理员账号 + 客户端 IP”每分钟最多 30 次，并最多跟踪 10000 个 key。该限流器是有界的单节点内存实现；单实例部署可直接使用。若横向扩展 API，发布前必须替换为 Redis 等共享限流实现，不能把每个节点各自的额度当成集群额度。
 
 未完成、失败或已删除媒体不会通过稳定公开地址读出。管理员只能删除没有文章、头像、封面、专题或工具引用的 READY 媒体；文章删除只移除引用，不自动删除可能复用的对象。
 

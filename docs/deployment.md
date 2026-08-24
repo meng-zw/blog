@@ -8,7 +8,7 @@
 
 ## 首次部署
 
-1. `cp .env.example .env`，替换每个 `CHANGE_ME`，管理员密码使用独立强密码，`PUBLIC_BASE_URL` 使用最终 HTTPS 地址。Local 为默认媒体存储；如选择 R2，先按 [媒体存储运行手册](media-storage.md) 配好 API 专用凭据、桶、公开域名和 CORS。
+1. `cp .env.example .env`，替换每个 `CHANGE_ME`，管理员密码使用独立强密码，`PUBLIC_BASE_URL` 使用最终 HTTPS 地址。Local 为默认媒体存储；如选择 R2，先按 [媒体存储运行手册](media-storage.md) 配好 API 专用凭据、桶、公开域名、精确的 `MEDIA_UPLOAD_ORIGIN` / `MEDIA_PUBLIC_ORIGINS` CSP 来源和 CORS。
 2. `docker compose --env-file .env config --quiet` 检查变量与配置。
 3. `docker compose --env-file .env build --pull` 构建镜像；构建阶段会先运行后端和前端测试。
 4. `docker compose --env-file .env up -d --wait --wait-timeout 240`。

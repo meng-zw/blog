@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 class ArticleMediaReferenceServiceTest {
@@ -56,7 +57,6 @@ class ArticleMediaReferenceServiceTest {
 
         service().synchronize(article(9L), "![diagram](/api/media/assets/12)", List.of(21L, 22L));
 
-        verify(articleMediaRepository).deleteByArticle_Id(9L);
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<ArticleMedia>> references = ArgumentCaptor.forClass(List.class);
         verify(articleMediaRepository).saveAll(references.capture());
@@ -76,7 +76,7 @@ class ArticleMediaReferenceServiceTest {
         assertThatIllegalArgumentException().isThrownBy(() -> service()
                 .synchronize(article(9L), "![diagram](/api/media/assets/12)", List.of()));
 
-        verify(articleMediaRepository, org.mockito.Mockito.never()).deleteByArticle_Id(any());
+        verify(articleMediaRepository, never()).deleteAllInBatch(any());
     }
 
     @Test
@@ -99,8 +99,32 @@ class ArticleMediaReferenceServiceTest {
     void removesAllExistingRowsWhenARevisionNoLongerReferencesMedia() {
         service().synchronize(article(9L), "body", List.of());
 
-        verify(articleMediaRepository).deleteByArticle_Id(9L);
-        verify(articleMediaRepository, org.mockito.Mockito.never()).saveAll(any());
+        verify(articleMediaRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void retainsExistingCompositeIdsWhileDeletingRemovedRowsAndReorderingAttachments() {
+        Article article = article(9L);
+        MediaAsset first = readyMedia(21L, MediaPurpose.ATTACHMENT, "first.pdf");
+        MediaAsset second = readyMedia(22L, MediaPurpose.ATTACHMENT, "second.pdf");
+        MediaAsset removed = readyMedia(23L, MediaPurpose.ATTACHMENT, "removed.pdf");
+        ArticleMedia retainedFirst = new ArticleMedia(article, first, ArticleMediaRole.ATTACHMENT,
+                "first.pdf", 0, NOW.minusSeconds(60));
+        ArticleMedia retainedSecond = new ArticleMedia(article, second, ArticleMediaRole.ATTACHMENT,
+                "second.pdf", 1, NOW.minusSeconds(60));
+        ArticleMedia obsolete = new ArticleMedia(article, removed, ArticleMediaRole.ATTACHMENT,
+                "removed.pdf", 2, NOW.minusSeconds(60));
+        when(articleMediaRepository.findByArticle_Id(9L)).thenReturn(List.of(retainedFirst, retainedSecond, obsolete));
+        when(mediaAssetRepository.findById(21L)).thenReturn(Optional.of(first));
+        when(mediaAssetRepository.findById(22L)).thenReturn(Optional.of(second));
+
+        service().synchronize(article, "body", List.of(22L, 21L));
+
+        verify(articleMediaRepository).deleteAllInBatch(List.of(obsolete));
+        verify(articleMediaRepository, never()).saveAll(any());
+        assertThat(retainedSecond.getSortOrder()).isZero();
+        assertThat(retainedFirst.getSortOrder()).isEqualTo(1);
+        assertThat(retainedFirst.getCreatedAt()).isEqualTo(NOW.minusSeconds(60));
     }
 
     @Test

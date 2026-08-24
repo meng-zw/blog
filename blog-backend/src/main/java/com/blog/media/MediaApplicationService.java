@@ -8,6 +8,7 @@ import com.blog.media.dto.MediaUploadRequest;
 import com.blog.media.dto.AdminMediaAssetResponse;
 import com.blog.media.storage.ObjectStorage;
 import com.blog.media.storage.ObjectStorageRegistry;
+import com.blog.media.storage.ObjectLocation;
 import com.blog.media.storage.ObjectUploadRequest;
 import com.blog.media.storage.StoredObject;
 import com.blog.media.storage.UploadMode;
@@ -69,11 +70,12 @@ public class MediaApplicationService {
         contentValidator.validateDeclaration(request.purpose(), request.filename(), request.contentType(), request.byteSize());
         AdminAccount owner = currentAdministrator(username);
         ObjectStorage storage = storageRegistry.get(properties.getProvider());
+        ObjectLocation newLocation = storage.locationForNewObject(objectKey(request.purpose(), request.contentType()));
         Instant now = clock.instant();
         MediaAsset asset = new MediaAsset();
-        asset.setProvider(storage.provider());
-        asset.setBucket(properties.getBucket());
-        asset.setStorageKey(objectKey(request.purpose(), request.contentType()));
+        asset.setProvider(newLocation.provider());
+        asset.setBucket(newLocation.bucket());
+        asset.setStorageKey(newLocation.objectKey());
         asset.setStatus(MediaStatus.PENDING_UPLOAD);
         asset.setPurpose(request.purpose());
         asset.setOriginalFilename(request.filename().strip());
@@ -86,7 +88,7 @@ public class MediaApplicationService {
 
         ObjectUploadRequest objectRequest = new ObjectUploadRequest(asset.getStorageKey(), asset.getContentType(), asset.getByteSize());
         UploadTicket ticket = storage.capabilities().directUpload()
-                ? directTicket(storage, objectRequest)
+                ? directTicket(storage, location(asset), objectRequest)
                 : new UploadTicket(UploadMode.PROXY, "PUT", URI.create("/api/admin/media/uploads/" + asset.getId() + "/content"),
                 Map.of("Content-Type", asset.getContentType()), now.plus(properties.getUploadTtl()));
         return new MediaUploadPlanResponse(asset.getId(), ticket.mode(), ticket.method(), ticket.uri().toString(),
@@ -105,7 +107,7 @@ public class MediaApplicationService {
         }
         try {
             InputStream limitedContent = contentValidator.limitProxyUpload(asset.getPurpose(), asset.getContentType(), content);
-            storage.upload(new ObjectUploadRequest(asset.getStorageKey(), asset.getContentType(), asset.getByteSize()), limitedContent);
+            storage.upload(location(asset), new ObjectUploadRequest(asset.getStorageKey(), asset.getContentType(), asset.getByteSize()), limitedContent);
         } catch (IOException exception) {
             throw new IllegalArgumentException("Unable to store uploaded media", exception);
         }
@@ -122,10 +124,10 @@ public class MediaApplicationService {
         }
         ObjectStorage storage = storage(asset);
         try {
-            StoredObject stored = storage.inspect(asset.getStorageKey());
+            StoredObject stored = storage.inspect(location(asset));
             verifyStoredObject(asset, stored);
             MediaContentValidator.ValidatedContent content;
-            try (InputStream stream = storage.openStream(asset.getStorageKey())) {
+            try (InputStream stream = storage.openStream(location(asset))) {
                 content = contentValidator.validateStoredContent(asset.getPurpose(), asset.getContentType(), stream);
             }
             Instant now = clock.instant();
@@ -161,7 +163,7 @@ public class MediaApplicationService {
             throw new ConflictException("Media asset is referenced and cannot be deleted");
         }
         try {
-            storage(asset).delete(asset.getStorageKey());
+            storage(asset).delete(location(asset));
         } catch (IOException exception) {
             throw new IllegalArgumentException("Unable to delete media object", exception);
         }
@@ -184,7 +186,7 @@ public class MediaApplicationService {
     @Transactional(readOnly = true)
     public PublicMediaAsset resolvePublic(long mediaId) {
         MediaAsset asset = readyPublicAsset(mediaId);
-        return new PublicMediaAsset(storage(asset).resolvePublicUrl(asset.getStorageKey()), asset.getContentType(),
+        return new PublicMediaAsset(storage(asset).resolvePublicUrl(location(asset)), asset.getContentType(),
                 asset.getOriginalFilename(), asset.getPurpose());
     }
 
@@ -196,7 +198,7 @@ public class MediaApplicationService {
     public PublicMediaContent openPublicDownload(long mediaId) {
         MediaAsset asset = readyPublicAsset(mediaId);
         try {
-            return new PublicMediaContent(storage(asset).openStream(asset.getStorageKey()), asset.getContentType(),
+            return new PublicMediaContent(storage(asset).openStream(location(asset)), asset.getContentType(),
                     asset.getOriginalFilename(), asset.getByteSize());
         } catch (IOException exception) {
             throw new IllegalArgumentException("Unable to open media object", exception);
@@ -209,21 +211,25 @@ public class MediaApplicationService {
         int cleaned = 0;
         List<MediaAsset> retryableAssets = mediaRepository.findByStatusIn(List.of(MediaStatus.ABANDONED, MediaStatus.FAILED));
         for (MediaAsset asset : mediaRepository.findByStatusAndCreatedAtBefore(MediaStatus.PENDING_UPLOAD, expiredBefore)) {
-            deleteObjectBestEffort(asset);
-            asset.setStatus(MediaStatus.ABANDONED);
+            asset.setStatus(deleteObjectBestEffort(asset) ? MediaStatus.DELETED : MediaStatus.ABANDONED);
             asset.setUpdatedAt(clock.instant());
             mediaRepository.save(asset);
             cleaned++;
         }
         for (MediaAsset asset : retryableAssets) {
-            deleteObjectBestEffort(asset);
+            if ((asset.getStatus() == MediaStatus.ABANDONED || asset.getStatus() == MediaStatus.FAILED)
+                    && deleteObjectBestEffort(asset)) {
+                asset.setStatus(MediaStatus.DELETED);
+                asset.setUpdatedAt(clock.instant());
+                mediaRepository.save(asset);
+            }
             cleaned++;
         }
         return cleaned;
     }
 
-    private UploadTicket directTicket(ObjectStorage storage, ObjectUploadRequest request) {
-        UploadTicket ticket = storage.createDirectUpload(request);
+    private UploadTicket directTicket(ObjectStorage storage, ObjectLocation location, ObjectUploadRequest request) {
+        UploadTicket ticket = storage.createDirectUpload(location, request);
         if (ticket.mode() != UploadMode.DIRECT) {
             throw new IllegalStateException("Direct upload storage returned a non-direct upload ticket");
         }
@@ -244,7 +250,7 @@ public class MediaApplicationService {
 
     private void failUpload(MediaAsset asset, ObjectStorage storage) {
         try {
-            storage.delete(asset.getStorageKey());
+            storage.delete(location(asset));
         } catch (IOException | RuntimeException ignored) {
             // A scheduled cleanup can retry storage cleanup, but clients must never observe a false READY state.
         }
@@ -253,11 +259,13 @@ public class MediaApplicationService {
         mediaRepository.save(asset);
     }
 
-    private void deleteObjectBestEffort(MediaAsset asset) {
+    private boolean deleteObjectBestEffort(MediaAsset asset) {
         try {
-            storage(asset).delete(asset.getStorageKey());
+            storage(asset).delete(location(asset));
+            return true;
         } catch (IOException | RuntimeException ignored) {
             // ABANDONED and FAILED remain eligible for the next cleanup run until their provider delete succeeds.
+            return false;
         }
     }
 
@@ -292,6 +300,10 @@ public class MediaApplicationService {
 
     private ObjectStorage storage(MediaAsset asset) {
         return storageRegistry.get(asset.getProvider());
+    }
+
+    private static ObjectLocation location(MediaAsset asset) {
+        return new ObjectLocation(asset.getProvider(), asset.getBucket(), asset.getStorageKey());
     }
 
     private static MediaResponse response(MediaAsset asset) {

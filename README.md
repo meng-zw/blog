@@ -80,6 +80,8 @@ npm run lint:legacy-routes
 - `BLOG_MEDIA_PROVIDER`：`local`（默认）或 `r2`
 - `BLOG_MEDIA_LOCAL_DIRECTORY`：Local 媒体存储目录
 - `BLOG_MEDIA_R2_*`：R2 仅由 API 读取的账户、桶、S3 endpoint 与公开域名变量
+- `MEDIA_UPLOAD_ORIGIN` / `MEDIA_PUBLIC_ORIGINS`：Web 容器 CSP 使用的精确 HTTPS R2 上传与图片 origin
+- `BLOG_MEDIA_UPLOAD_PLAN_RATE_LIMIT_*`：单实例上传计划限流参数（多 API 节点需替换为共享限流器）
 - `BLOG_ADMIN_USERNAME`：首次启动时创建的管理员用户名
 - `BLOG_ADMIN_PASSWORD`：首次启动时创建的管理员密码
 - `BLOG_ADMIN_DISPLAY_NAME`：管理员显示名，默认“小M”

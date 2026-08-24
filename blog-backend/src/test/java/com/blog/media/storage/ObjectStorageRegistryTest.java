@@ -47,33 +47,38 @@ class ObjectStorageRegistryTest {
         }
 
         @Override
-        public UploadTicket createDirectUpload(ObjectUploadRequest request) {
+        public ObjectLocation locationForNewObject(String objectKey) {
+            return new ObjectLocation(provider, provider == StorageProvider.LOCAL ? "" : "bucket", objectKey);
+        }
+
+        @Override
+        public UploadTicket createDirectUpload(ObjectLocation location, ObjectUploadRequest request) {
             return new UploadTicket(UploadMode.DIRECT, "PUT", URI.create("https://storage.example/upload"),
                     Map.of("Content-Type", request.contentType()), Instant.parse("2026-08-24T00:10:00Z"));
         }
 
         @Override
-        public StoredObject upload(ObjectUploadRequest request, InputStream content) {
+        public StoredObject upload(ObjectLocation location, ObjectUploadRequest request, InputStream content) {
             return new StoredObject(request.objectKey(), request.contentType(), request.byteSize(), "etag");
         }
 
         @Override
-        public StoredObject inspect(String objectKey) {
-            return new StoredObject(objectKey, "image/png", 1, "etag");
+        public StoredObject inspect(ObjectLocation location) {
+            return new StoredObject(location.objectKey(), "image/png", 1, "etag");
         }
 
         @Override
-        public InputStream openStream(String objectKey) {
+        public InputStream openStream(ObjectLocation location) {
             return InputStream.nullInputStream();
         }
 
         @Override
-        public URI resolvePublicUrl(String objectKey) {
-            return URI.create("https://storage.example/" + objectKey);
+        public URI resolvePublicUrl(ObjectLocation location) {
+            return URI.create("https://storage.example/" + location.objectKey());
         }
 
         @Override
-        public void delete(String objectKey) {
+        public void delete(ObjectLocation location) {
         }
     }
 }

@@ -21,7 +21,6 @@ blog:
   public-base-url: ${BLOG_PUBLIC_BASE_URL}
   media:
     provider: ${BLOG_MEDIA_PROVIDER:local}
-    bucket: ${BLOG_MEDIA_R2_BUCKET:}
     r2:
       account-id: ${BLOG_MEDIA_R2_ACCOUNT_ID:}
       access-key-id: ${BLOG_MEDIA_R2_ACCESS_KEY_ID:}
@@ -29,6 +28,7 @@ blog:
       bucket: ${BLOG_MEDIA_R2_BUCKET:}
       endpoint: ${BLOG_MEDIA_R2_ENDPOINT:}
       public-base-url: ${BLOG_MEDIA_R2_PUBLIC_BASE_URL:}
+      legacy-buckets: ${BLOG_MEDIA_R2_LEGACY_BUCKETS:}
       upload-url-ttl: ${BLOG_MEDIA_R2_UPLOAD_URL_TTL:10m}
 management:
   endpoint:

@@ -2,6 +2,7 @@ package com.blog.media.storage.r2;
 
 import com.blog.media.StorageProvider;
 import com.blog.media.storage.ObjectStorage;
+import com.blog.media.storage.ObjectLocation;
 import com.blog.media.storage.ObjectUploadRequest;
 import com.blog.media.storage.StorageCapabilities;
 import com.blog.media.storage.StoredObject;
@@ -63,10 +64,17 @@ public class R2ObjectStorage implements ObjectStorage {
     }
 
     @Override
-    public UploadTicket createDirectUpload(ObjectUploadRequest request) {
+    public ObjectLocation locationForNewObject(String objectKey) {
+        properties.validate();
+        return new ObjectLocation(StorageProvider.R2, properties.getBucket(), requireObjectKey(objectKey));
+    }
+
+    @Override
+    public UploadTicket createDirectUpload(ObjectLocation location, ObjectUploadRequest request) {
+        validateUploadLocation(location, request.objectKey());
         PutObjectPresignRequest presignRequest = PutObjectPresignRequest.builder()
                 .signatureDuration(properties.getUploadUrlTtl())
-                .putObjectRequest(putRequest(request))
+                .putObjectRequest(putRequest(location, request))
                 .build();
         PresignedPutObjectRequest signed = presigner.presignPutObject(presignRequest);
         Instant expiresAt = clock.instant().plus(properties.getUploadUrlTtl());
@@ -74,15 +82,16 @@ public class R2ObjectStorage implements ObjectStorage {
     }
 
     @Override
-    public StoredObject upload(ObjectUploadRequest request, InputStream content) {
+    public StoredObject upload(ObjectLocation location, ObjectUploadRequest request, InputStream content) {
         throw new UnsupportedOperationException("R2 object storage accepts browser direct uploads only");
     }
 
     @Override
-    public StoredObject inspect(String objectKey) {
+    public StoredObject inspect(ObjectLocation location) {
+        String objectKey = readableKey(location);
         try {
             HeadObjectResponse response = client.headObject(HeadObjectRequest.builder()
-                    .bucket(properties.getBucket()).key(requireObjectKey(objectKey)).build());
+                    .bucket(location.bucket()).key(objectKey).build());
             return new StoredObject(objectKey, requireContentType(response.contentType(), objectKey), response.contentLength(), response.eTag());
         } catch (S3Exception exception) {
             throw translateMissing(objectKey, exception);
@@ -90,10 +99,11 @@ public class R2ObjectStorage implements ObjectStorage {
     }
 
     @Override
-    public InputStream openStream(String objectKey) throws IOException {
+    public InputStream openStream(ObjectLocation location) throws IOException {
+        String objectKey = readableKey(location);
         try {
             ResponseInputStream<GetObjectResponse> stream = client.getObject(GetObjectRequest.builder()
-                    .bucket(properties.getBucket()).key(requireObjectKey(objectKey)).build(), ResponseTransformer.toInputStream());
+                    .bucket(location.bucket()).key(objectKey).build(), ResponseTransformer.toInputStream());
             return stream;
         } catch (S3Exception exception) {
             throw translateMissing(objectKey, exception);
@@ -101,18 +111,20 @@ public class R2ObjectStorage implements ObjectStorage {
     }
 
     @Override
-    public URI resolvePublicUrl(String objectKey) {
+    public URI resolvePublicUrl(ObjectLocation location) {
+        String objectKey = readableKey(location);
         String encodedObjectPath = encodePath(requireObjectKey(objectKey));
-        URI base = properties.publicBaseUri();
+        URI base = properties.publicBaseUri(location.bucket());
         String basePath = base.getRawPath() == null ? "" : base.getRawPath().replaceAll("/+$", "");
         String publicUrl = base.getScheme() + "://" + base.getRawAuthority() + basePath + "/" + encodedObjectPath;
         return URI.create(publicUrl);
     }
 
     @Override
-    public void delete(String objectKey) throws IOException {
+    public void delete(ObjectLocation location) throws IOException {
+        String objectKey = readableKey(location);
         try {
-            client.deleteObject(DeleteObjectRequest.builder().bucket(properties.getBucket()).key(requireObjectKey(objectKey)).build());
+            client.deleteObject(DeleteObjectRequest.builder().bucket(location.bucket()).key(objectKey).build());
         } catch (S3Exception exception) {
             if (!isMissing(exception)) {
                 throw exception;
@@ -120,9 +132,9 @@ public class R2ObjectStorage implements ObjectStorage {
         }
     }
 
-    private PutObjectRequest putRequest(ObjectUploadRequest request) {
+    private PutObjectRequest putRequest(ObjectLocation location, ObjectUploadRequest request) {
         return PutObjectRequest.builder()
-                .bucket(properties.getBucket())
+                .bucket(location.bucket())
                 .key(request.objectKey())
                 .contentType(request.contentType())
                 .cacheControl(IMMUTABLE_CACHE_CONTROL)
@@ -146,6 +158,29 @@ public class R2ObjectStorage implements ObjectStorage {
             throw new IllegalArgumentException("Invalid storage key");
         }
         return objectKey;
+    }
+
+    private String readableKey(ObjectLocation location) {
+        validateProvider(location);
+        properties.publicBaseUri(location.bucket());
+        return requireObjectKey(location.objectKey());
+    }
+
+    private void validateUploadLocation(ObjectLocation location, String expectedKey) {
+        validateProvider(location);
+        if (!properties.getBucket().equals(location.bucket())) {
+            throw new IllegalArgumentException("New R2 uploads must use the configured upload bucket");
+        }
+        if (!location.objectKey().equals(expectedKey)) {
+            throw new IllegalArgumentException("Object request key does not match its location");
+        }
+        requireObjectKey(location.objectKey());
+    }
+
+    private static void validateProvider(ObjectLocation location) {
+        if (location == null || location.provider() != StorageProvider.R2 || location.bucket().isBlank()) {
+            throw new IllegalArgumentException("Invalid R2 object location");
+        }
     }
 
     private static String requireContentType(String contentType, String objectKey) {

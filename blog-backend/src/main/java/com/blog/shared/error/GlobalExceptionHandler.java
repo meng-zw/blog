@@ -36,6 +36,11 @@ public class GlobalExceptionHandler {
         return problem(HttpStatus.CONFLICT, "Conflict", exception.getMessage(), request, null);
     }
 
+    @ExceptionHandler(TooManyRequestsException.class)
+    ResponseEntity<ProblemDetail> handleTooManyRequests(TooManyRequestsException exception, HttpServletRequest request) {
+        return problem(HttpStatus.TOO_MANY_REQUESTS, "Too many requests", exception.getMessage(), request, null);
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ResponseEntity<ProblemDetail> handleValidation(MethodArgumentNotValidException exception, HttpServletRequest request) {
         Map<String, String> errors = new LinkedHashMap<>();

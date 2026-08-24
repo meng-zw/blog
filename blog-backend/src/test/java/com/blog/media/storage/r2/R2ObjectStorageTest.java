@@ -2,6 +2,7 @@ package com.blog.media.storage.r2;
 
 import com.blog.media.StorageProvider;
 import com.blog.media.storage.ObjectUploadRequest;
+import com.blog.media.storage.ObjectLocation;
 import com.blog.media.storage.StoredObject;
 import com.blog.media.storage.UploadMode;
 import com.blog.media.storage.UploadTicket;
@@ -49,7 +50,8 @@ class R2ObjectStorageTest {
         when(presigner.presignPutObject(any(PutObjectPresignRequest.class))).thenReturn(presigned);
         R2ObjectStorage storage = storage(mock(S3Client.class), presigner);
 
-        UploadTicket ticket = storage.createDirectUpload(new ObjectUploadRequest("inline-images/a.png", "image/png", 7));
+        UploadTicket ticket = storage.createDirectUpload(location("inline-images/a.png"),
+                new ObjectUploadRequest("inline-images/a.png", "image/png", 7));
 
         ArgumentCaptor<PutObjectPresignRequest> request = ArgumentCaptor.forClass(PutObjectPresignRequest.class);
         verify(presigner).presignPutObject(request.capture());
@@ -77,7 +79,7 @@ class R2ObjectStorageTest {
         when(client.headObject(any(HeadObjectRequest.class))).thenReturn(HeadObjectResponse.builder()
                 .contentType("image/png").contentLength(7L).eTag("etag-1").build());
 
-        StoredObject object = storage.inspect("inline-images/a.png");
+        StoredObject object = storage.inspect(location("inline-images/a.png"));
 
         ArgumentCaptor<HeadObjectRequest> request = ArgumentCaptor.forClass(HeadObjectRequest.class);
         verify(client).headObject(request.capture());
@@ -86,9 +88,39 @@ class R2ObjectStorageTest {
         assertThat(object).isEqualTo(new StoredObject("inline-images/a.png", "image/png", 7L, "etag-1"));
 
         when(client.headObject(any(HeadObjectRequest.class))).thenThrow(NoSuchKeyException.builder().message("gone").build());
-        assertThatThrownBy(() -> storage.inspect("inline-images/missing.png"))
+        assertThatThrownBy(() -> storage.inspect(location("inline-images/missing.png")))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("inline-images/missing.png");
+    }
+
+    @Test
+    void usesThePersistedReadableBucketAndItsPublicBaseInsteadOfTheCurrentUploadBucket() {
+        S3Client client = mock(S3Client.class);
+        R2Properties properties = properties();
+        properties.setLegacyBuckets("archive-media=https://archive-images.example.com/blog");
+        R2ObjectStorage storage = new R2ObjectStorage(client, mock(S3Presigner.class), properties,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        ObjectLocation location = new ObjectLocation(StorageProvider.R2, "archive-media", "inline-images/a.png");
+        when(client.headObject(any(HeadObjectRequest.class))).thenReturn(HeadObjectResponse.builder()
+                .contentType("image/png").contentLength(7L).eTag("etag-1").build());
+
+        storage.inspect(location);
+
+        ArgumentCaptor<HeadObjectRequest> request = ArgumentCaptor.forClass(HeadObjectRequest.class);
+        verify(client).headObject(request.capture());
+        assertThat(request.getValue().bucket()).isEqualTo("archive-media");
+        assertThat(storage.resolvePublicUrl(location))
+                .hasToString("https://archive-images.example.com/blog/inline-images/a.png");
+    }
+
+    @Test
+    void refusesPersistedBucketsThatAreNotExplicitlyConfiguredAsReadable() {
+        R2ObjectStorage storage = storage(mock(S3Client.class), mock(S3Presigner.class));
+        ObjectLocation location = new ObjectLocation(StorageProvider.R2, "unknown-media", "inline-images/a.png");
+
+        assertThatThrownBy(() -> storage.inspect(location))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not configured for reading");
     }
 
     @Test
@@ -101,7 +133,7 @@ class R2ObjectStorageTest {
                 .<ResponseTransformer<GetObjectResponse, ResponseInputStream<GetObjectResponse>>>any()))
                 .thenReturn(stream);
 
-        try (var content = storage.openStream("inline-images/a.png")) {
+        try (var content = storage.openStream(location("inline-images/a.png"))) {
             assertThat(content.readAllBytes()).containsExactly(1, 2, 3);
         }
 
@@ -120,7 +152,8 @@ class R2ObjectStorageTest {
         when(presigner.presignPutObject(any(PutObjectPresignRequest.class))).thenReturn(presigned);
 
         UploadTicket ticket = storage(mock(S3Client.class), presigner)
-                .createDirectUpload(new ObjectUploadRequest("attachments/a.pdf", "application/pdf", 7));
+                .createDirectUpload(location("attachments/a.pdf"),
+                        new ObjectUploadRequest("attachments/a.pdf", "application/pdf", 7));
 
         ArgumentCaptor<PutObjectPresignRequest> request = ArgumentCaptor.forClass(PutObjectPresignRequest.class);
         verify(presigner).presignPutObject(request.capture());
@@ -133,9 +166,9 @@ class R2ObjectStorageTest {
         S3Client client = mock(S3Client.class);
         R2ObjectStorage storage = storage(client, mock(S3Presigner.class));
 
-        assertThat(storage.resolvePublicUrl("inline-images/space 名.png"))
+        assertThat(storage.resolvePublicUrl(location("inline-images/space 名.png")))
                 .hasToString("https://images.example.com/blog/inline-images/space%20%E5%90%8D.png");
-        storage.delete("inline-images/a.png");
+        storage.delete(location("inline-images/a.png"));
 
         ArgumentCaptor<DeleteObjectRequest> request = ArgumentCaptor.forClass(DeleteObjectRequest.class);
         verify(client).deleteObject(request.capture());
@@ -148,7 +181,7 @@ class R2ObjectStorageTest {
         S3Client client = mock(S3Client.class);
         when(client.deleteObject(any(DeleteObjectRequest.class))).thenThrow(S3Exception.builder().statusCode(404).build());
 
-        storage(client, mock(S3Presigner.class)).delete("inline-images/already-gone.png");
+        storage(client, mock(S3Presigner.class)).delete(location("inline-images/already-gone.png"));
 
         verify(client).deleteObject(any(DeleteObjectRequest.class));
     }
@@ -185,7 +218,8 @@ class R2ObjectStorageTest {
         try (S3Presigner presigner = new R2Configuration().r2S3Presigner(properties)) {
             R2ObjectStorage storage = new R2ObjectStorage(mock(S3Client.class), presigner, properties, Clock.fixed(NOW, ZoneOffset.UTC));
 
-            UploadTicket ticket = storage.createDirectUpload(new ObjectUploadRequest("inline-images/direct.png", "image/png", 7));
+            UploadTicket ticket = storage.createDirectUpload(location("inline-images/direct.png"),
+                    new ObjectUploadRequest("inline-images/direct.png", "image/png", 7));
 
             assertThat(ticket.uri().getPath()).isEqualTo("/blog-media/inline-images/direct.png");
         }
@@ -193,6 +227,10 @@ class R2ObjectStorageTest {
 
     private R2ObjectStorage storage(S3Client client, S3Presigner presigner) {
         return new R2ObjectStorage(client, presigner, properties(), Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private ObjectLocation location(String objectKey) {
+        return new ObjectLocation(StorageProvider.R2, "blog-media", objectKey);
     }
 
     private R2Properties properties() {

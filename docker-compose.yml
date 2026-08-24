@@ -41,7 +41,11 @@ services:
       BLOG_MEDIA_R2_BUCKET: ${BLOG_MEDIA_R2_BUCKET:-}
       BLOG_MEDIA_R2_ENDPOINT: ${BLOG_MEDIA_R2_ENDPOINT:-}
       BLOG_MEDIA_R2_PUBLIC_BASE_URL: ${BLOG_MEDIA_R2_PUBLIC_BASE_URL:-}
+      BLOG_MEDIA_R2_LEGACY_BUCKETS: ${BLOG_MEDIA_R2_LEGACY_BUCKETS:-}
       BLOG_MEDIA_R2_UPLOAD_URL_TTL: ${BLOG_MEDIA_R2_UPLOAD_URL_TTL:-}
+      BLOG_MEDIA_UPLOAD_PLAN_RATE_LIMIT_MAX_REQUESTS: ${BLOG_MEDIA_UPLOAD_PLAN_RATE_LIMIT_MAX_REQUESTS:-30}
+      BLOG_MEDIA_UPLOAD_PLAN_RATE_LIMIT_WINDOW: ${BLOG_MEDIA_UPLOAD_PLAN_RATE_LIMIT_WINDOW:-1m}
+      BLOG_MEDIA_UPLOAD_PLAN_RATE_LIMIT_MAX_ENTRIES: ${BLOG_MEDIA_UPLOAD_PLAN_RATE_LIMIT_MAX_ENTRIES:-10000}
     volumes: ["media-data:/app/data"]
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8081/api/actuator/health/readiness"]
@@ -53,7 +57,11 @@ services:
   web:
     build: { context: ./blog-frontend }
     restart: unless-stopped
-    environment: { BACKEND_HOST: api, BACKEND_PORT: 8081 }
+    environment:
+      BACKEND_HOST: api
+      BACKEND_PORT: 8081
+      MEDIA_UPLOAD_ORIGIN: ${MEDIA_UPLOAD_ORIGIN:-}
+      MEDIA_PUBLIC_ORIGINS: ${MEDIA_PUBLIC_ORIGINS:-}
     ports: ["${WEB_PORT:-8080}:8080"]
     depends_on:
       api: { condition: service_healthy }

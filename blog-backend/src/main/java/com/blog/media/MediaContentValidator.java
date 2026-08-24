@@ -13,6 +13,10 @@ import java.io.InputStream;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
  * Validates client declarations and authoritative object content for media uploads.
@@ -28,6 +32,8 @@ public class MediaContentValidator {
     private static final String DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     private static final String XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
     private static final String PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    private static final int MAX_ARCHIVE_ENTRIES = 10_000;
+    private static final long MAX_ARCHIVE_EXPANDED_BYTES = 100L * 1024 * 1024;
 
     private static final Map<String, FileType> IMAGE_TYPES = Map.of(
             PNG, new FileType("png", "png", new byte[][]{{(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}}),
@@ -74,6 +80,10 @@ public class MediaContentValidator {
                     : "Image signature does not match its declared type");
         }
         if (purpose == MediaPurpose.ATTACHMENT) {
+            if (normalizedContentType.equals(ZIP) || normalizedContentType.equals(DOCX)
+                    || normalizedContentType.equals(XLSX) || normalizedContentType.equals(PPTX)) {
+                validateZipPackage(bytes, requiredOfficeEntries(normalizedContentType));
+            }
             return ValidatedContent.attachment();
         }
         return validateImage(bytes, type);
@@ -222,6 +232,55 @@ public class MediaContentValidator {
             }
         }
         return false;
+    }
+
+    private static Set<String> requiredOfficeEntries(String contentType) {
+        return switch (contentType) {
+            case DOCX -> Set.of("[Content_Types].xml", "word/document.xml");
+            case XLSX -> Set.of("[Content_Types].xml", "xl/workbook.xml");
+            case PPTX -> Set.of("[Content_Types].xml", "ppt/presentation.xml");
+            default -> Set.of();
+        };
+    }
+
+    private static void validateZipPackage(byte[] bytes, Set<String> requiredEntries) {
+        Set<String> names = new LinkedHashSet<>();
+        long expandedBytes = 0;
+        int entries = 0;
+        byte[] buffer = new byte[8192];
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                entries++;
+                if (entries > MAX_ARCHIVE_ENTRIES) {
+                    throw new IllegalArgumentException("Attachment archive contains too many entries");
+                }
+                String name = entry.getName();
+                if (name == null || name.isBlank() || name.startsWith("/") || name.startsWith("\\")
+                        || name.contains("../") || name.contains("..\\") || name.length() > 1024) {
+                    throw new IllegalArgumentException("Attachment archive contains an unsafe entry name");
+                }
+                if (!names.add(name)) {
+                    throw new IllegalArgumentException("Attachment archive contains duplicate entries");
+                }
+                int read;
+                while ((read = zip.read(buffer)) != -1) {
+                    expandedBytes += read;
+                    if (expandedBytes > MAX_ARCHIVE_EXPANDED_BYTES) {
+                        throw new IllegalArgumentException("Attachment archive expands beyond the safe limit");
+                    }
+                }
+                zip.closeEntry();
+            }
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Attachment ZIP package cannot be decoded", exception);
+        }
+        if (entries == 0) {
+            throw new IllegalArgumentException("Attachment ZIP package cannot be decoded");
+        }
+        if (!names.containsAll(requiredEntries)) {
+            throw new IllegalArgumentException("Office attachment package is missing required entries");
+        }
     }
 
     private static byte[][] zipSignatures() {

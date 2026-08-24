@@ -170,9 +170,10 @@ class MediaStorageServiceTest {
         MediaProperties properties = properties();
         com.blog.media.storage.LocalObjectStorage storage = mock(com.blog.media.storage.LocalObjectStorage.class);
         byte[] bytes = png(3, 2);
-        when(storage.upload(any(com.blog.media.storage.ObjectUploadRequest.class), any(ByteArrayInputStream.class)))
+        when(storage.upload(any(com.blog.media.storage.ObjectLocation.class),
+                any(com.blog.media.storage.ObjectUploadRequest.class), any(ByteArrayInputStream.class)))
                 .thenAnswer(invocation -> {
-                    com.blog.media.storage.ObjectUploadRequest request = invocation.getArgument(0);
+                    com.blog.media.storage.ObjectUploadRequest request = invocation.getArgument(1);
                     return new com.blog.media.storage.StoredObject(request.objectKey(), request.contentType(),
                             request.byteSize(), "etag");
                 });
@@ -180,7 +181,8 @@ class MediaStorageServiceTest {
 
         service.store(new MockMultipartFile("file", "portrait.png", "image/png", bytes));
 
-        verify(storage).upload(any(com.blog.media.storage.ObjectUploadRequest.class), any(ByteArrayInputStream.class));
+        verify(storage).upload(any(com.blog.media.storage.ObjectLocation.class),
+                any(com.blog.media.storage.ObjectUploadRequest.class), any(ByteArrayInputStream.class));
     }
 
     @Test

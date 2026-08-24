@@ -1,6 +1,7 @@
 package com.blog.media;
 
 import com.blog.media.storage.LocalObjectStorage;
+import com.blog.media.storage.ObjectLocation;
 import com.blog.media.storage.ObjectUploadRequest;
 import com.blog.media.storage.StoredObject;
 import com.blog.shared.error.ResourceNotFoundException;
@@ -64,7 +65,8 @@ public class MediaStorageService {
         String storageKey = UUID.randomUUID() + "." + imageExtension(contentType);
         StoredObject stored;
         try {
-            stored = localObjectStorage.upload(new ObjectUploadRequest(storageKey, contentType, bytes.length),
+            stored = localObjectStorage.upload(new ObjectLocation(StorageProvider.LOCAL, "", storageKey),
+                    new ObjectUploadRequest(storageKey, contentType, bytes.length),
                     new ByteArrayInputStream(bytes));
         } catch (IOException exception) {
             throw new IllegalArgumentException("Unable to store uploaded image", exception);
@@ -90,7 +92,7 @@ public class MediaStorageService {
             return repository.save(asset);
         } catch (RuntimeException | Error exception) {
             try {
-                localObjectStorage.delete(storageKey);
+                localObjectStorage.delete(new ObjectLocation(StorageProvider.LOCAL, "", storageKey));
             } catch (IOException ignored) {
                 // Preserve the database failure while making a best-effort object cleanup.
             }

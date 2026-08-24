@@ -50,10 +50,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AdminMediaControllerTest {
     @Autowired MockMvc mockMvc;
     @MockitoBean MediaApplicationService mediaApplicationService;
+    @MockitoBean MediaUploadPlanRateLimiter mediaUploadPlanRateLimiter;
     @MockitoBean AdminAccountRepository adminAccountRepository;
 
     @Test
     void administratorWithCsrfCanRequestSnakeCaseUploadPlan() throws Exception {
+        when(mediaUploadPlanRateLimiter.tryAcquire("owner", "127.0.0.1")).thenReturn(true);
         when(mediaApplicationService.requestUpload(any(), eq("owner"))).thenReturn(new MediaUploadPlanResponse(
                 42L, UploadMode.PROXY, "PUT", "/api/admin/media/uploads/42/content",
                 Map.of("Content-Type", "image/png"), Instant.parse("2026-08-24T10:10:00Z")));
@@ -65,6 +67,20 @@ class AdminMediaControllerTest {
                 .andExpect(jsonPath("$.media_id").value(42))
                 .andExpect(jsonPath("$.upload_mode").value("PROXY"))
                 .andExpect(jsonPath("$.upload_url").value("/api/admin/media/uploads/42/content"));
+    }
+
+    @Test
+    void rejectsUploadPlanRequestsAboveTheAdministratorIpLimitWithProblemDetails() throws Exception {
+        when(mediaUploadPlanRateLimiter.tryAcquire("owner", "203.0.113.9")).thenReturn(false);
+
+        mockMvc.perform(post("/api/admin/media/uploads").contextPath("/api")
+                        .with(user("owner").roles("ADMIN")).with(csrf())
+                        .with(request -> { request.setRemoteAddr("203.0.113.9"); return request; })
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"filename\":\"note.png\",\"content_type\":\"image/png\",\"byte_size\":68,\"purpose\":\"INLINE_IMAGE\"}"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.detail").value("上传请求过于频繁，请稍后重试"));
     }
 
     @Test

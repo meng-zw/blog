@@ -12,6 +12,8 @@ import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -67,18 +69,37 @@ public class ArticleMediaReferenceService {
                 .map(id -> requireReady(id, MediaPurpose.ATTACHMENT, "Attachment media"))
                 .toList();
 
-        articleMediaRepository.deleteByArticle_Id(article.getId());
         Instant createdAt = clock.instant();
-        List<ArticleMedia> references = new java.util.ArrayList<>(inline.size() + attachmentAssets.size());
+        List<ArticleMedia> desired = new java.util.ArrayList<>(inline.size() + attachmentAssets.size());
         for (MediaAsset media : inline) {
-            references.add(new ArticleMedia(article, media, ArticleMediaRole.INLINE, null, null, createdAt));
+            desired.add(new ArticleMedia(article, media, ArticleMediaRole.INLINE, null, null, createdAt));
         }
         for (int index = 0; index < attachmentAssets.size(); index++) {
             MediaAsset media = attachmentAssets.get(index);
-            references.add(new ArticleMedia(article, media, ArticleMediaRole.ATTACHMENT, displayName(media), index, createdAt));
+            desired.add(new ArticleMedia(article, media, ArticleMediaRole.ATTACHMENT, displayName(media), index, createdAt));
         }
-        if (!references.isEmpty()) {
-            articleMediaRepository.saveAll(references);
+
+        Map<ArticleMediaId, ArticleMedia> existingById = new LinkedHashMap<>();
+        for (ArticleMedia existing : articleMediaRepository.findByArticle_Id(article.getId())) {
+            existingById.put(existing.getId(), existing);
+        }
+        Set<ArticleMediaId> desiredIds = desired.stream().map(ArticleMedia::getId)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        List<ArticleMedia> obsolete = existingById.values().stream()
+                .filter(reference -> !desiredIds.contains(reference.getId())).toList();
+        if (!obsolete.isEmpty()) articleMediaRepository.deleteAllInBatch(obsolete);
+
+        List<ArticleMedia> additions = new java.util.ArrayList<>();
+        for (ArticleMedia candidate : desired) {
+            ArticleMedia retained = existingById.get(candidate.getId());
+            if (retained == null) {
+                additions.add(candidate);
+            } else if (candidate.getId().getRole() == ArticleMediaRole.ATTACHMENT) {
+                retained.updateAttachment(candidate.getDisplayName(), candidate.getSortOrder());
+            }
+        }
+        if (!additions.isEmpty()) {
+            articleMediaRepository.saveAll(additions);
         }
     }
 

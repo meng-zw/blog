@@ -7,7 +7,6 @@ export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 export const MAX_ZIP_ATTACHMENT_BYTES = 50 * 1024 * 1024
 export const ACCEPTED_ATTACHMENT_TYPES = 'application/pdf,application/zip,application/x-zip-compressed,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation'
 const ACCEPTED_IMAGE_TYPE_SET: ReadonlySet<string> = new Set(ACCEPTED_IMAGE_TYPES.split(','))
-const ACCEPTED_ATTACHMENT_TYPE_SET: ReadonlySet<string> = new Set(ACCEPTED_ATTACHMENT_TYPES.split(','))
 const ATTACHMENT_CONTENT_TYPES: Readonly<Record<string, string>> = {
   pdf: 'application/pdf',
   zip: 'application/zip',
@@ -28,8 +27,11 @@ export function attachmentFileHint(file: File): string | null {
   const extension = file.name.split('.').pop()?.toLowerCase()
   const zip = extension === 'zip'
   const expectedTypes = 'PDF、ZIP、TXT、DOCX、XLSX 或 PPTX'
-  if (!extension || !['pdf', 'zip', 'txt', 'docx', 'xlsx', 'pptx'].includes(extension)) return `仅支持 ${expectedTypes} 附件，服务器会再次校验格式和文件签名。`
-  if (file.type && !ACCEPTED_ATTACHMENT_TYPE_SET.has(file.type.toLowerCase())) return `仅支持 ${expectedTypes} 附件，服务器会再次校验格式和文件签名。`
+  const canonicalType = extension ? ATTACHMENT_CONTENT_TYPES[extension] : undefined
+  if (!canonicalType) return `仅支持 ${expectedTypes} 附件，服务器会再次校验格式和文件签名。`
+  const browserType = file.type.trim().toLowerCase()
+  const normalizedBrowserType = browserType === 'application/x-zip-compressed' ? 'application/zip' : browserType
+  if (normalizedBrowserType && normalizedBrowserType !== 'application/octet-stream' && normalizedBrowserType !== canonicalType) return `仅支持 ${expectedTypes} 附件，服务器会再次校验格式和文件签名。`
   const limit = zip ? MAX_ZIP_ATTACHMENT_BYTES : MAX_ATTACHMENT_BYTES
   if (file.size > limit) return `${zip ? 'ZIP 附件' : '附件'}建议不超过 ${zip ? '50' : '20'} MiB；服务器校验为最终结果。`
   return null

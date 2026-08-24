@@ -31,6 +31,17 @@ class MediaContentValidatorTest {
     }
 
     @Test
+    void keepsCanonicalAttachmentMimeAuthoritativeAfterFrontendNormalization() {
+        validator.validateDeclaration(MediaPurpose.ATTACHMENT, "archive.zip", "application/zip", 1024);
+        assertThatIllegalArgumentException().isThrownBy(() -> validator.validateDeclaration(
+                        MediaPurpose.ATTACHMENT, "archive.zip", "application/x-zip-compressed", 1024))
+                .withMessage("Only PDF, ZIP, TXT, DOCX, XLSX, or PPTX attachments are allowed");
+        assertThatIllegalArgumentException().isThrownBy(() -> validator.validateDeclaration(
+                        MediaPurpose.ATTACHMENT, "archive.zip", "", 1024))
+                .withMessage("Content type is required");
+    }
+
+    @Test
     void rejectsImageMimeTypeForAttachments() {
         assertThatIllegalArgumentException().isThrownBy(() -> validator.validateDeclaration(
                         MediaPurpose.ATTACHMENT, "photo.png", "image/png", 1024))
@@ -112,13 +123,22 @@ class MediaContentValidatorTest {
     }
 
     @Test
-    void validatesPdfAndZipBasedOfficeAttachmentSignatures() {
+    void validatesPdfAndRequiredOfficePackageEntries() {
         assertThat(validator.validateStoredContent(MediaPurpose.ATTACHMENT, "application/pdf",
                 new ByteArrayInputStream("%PDF-1.7".getBytes()))).isEqualTo(MediaContentValidator.ValidatedContent.attachment());
         assertThat(validator.validateStoredContent(MediaPurpose.ATTACHMENT,
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                new ByteArrayInputStream(new byte[]{'P', 'K', 3, 4})))
+                new ByteArrayInputStream(zip("[Content_Types].xml", "word/document.xml"))))
                 .isEqualTo(MediaContentValidator.ValidatedContent.attachment());
+    }
+
+    @Test
+    void rejectsAnArbitraryZipRenamedAsAnOfficeDocument() {
+        assertThatIllegalArgumentException().isThrownBy(() -> validator.validateStoredContent(
+                        MediaPurpose.ATTACHMENT,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        new ByteArrayInputStream(zip("notes.txt"))))
+                .withMessage("Office attachment package is missing required entries");
     }
 
     @Test
@@ -158,6 +178,22 @@ class MediaContentValidatorTest {
 
     private static byte[] pngSignature() {
         return new byte[]{(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+    }
+
+    private static byte[] zip(String... entries) {
+        try {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(output)) {
+                for (String entry : entries) {
+                    zip.putNextEntry(new java.util.zip.ZipEntry(entry));
+                    zip.write("content".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    zip.closeEntry();
+                }
+            }
+            return output.toByteArray();
+        } catch (java.io.IOException exception) {
+            throw new AssertionError(exception);
+        }
     }
 
     private static final class RepeatingInputStream extends InputStream {

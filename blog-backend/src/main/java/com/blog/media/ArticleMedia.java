@@ -56,4 +56,12 @@ public class ArticleMedia {
     public String getDisplayName() { return displayName; }
     public Integer getSortOrder() { return sortOrder; }
     public Instant getCreatedAt() { return createdAt; }
+
+    void updateAttachment(String displayName, int sortOrder) {
+        if (id == null || id.getRole() != ArticleMediaRole.ATTACHMENT) {
+            throw new IllegalStateException("Only attachment references can be reordered");
+        }
+        this.displayName = displayName;
+        this.sortOrder = sortOrder;
+    }
 }

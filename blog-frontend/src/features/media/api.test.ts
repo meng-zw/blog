@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { completeMediaUpload, requestMediaUpload } from './api'
+import { attachmentFileHint, completeMediaUpload, requestMediaUpload } from './api'
 
 const fetchMock = vi.fn<typeof fetch>()
 
@@ -54,6 +54,10 @@ describe('media API', () => {
 
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { content_type: string }
     expect(body.content_type).toBe(expectedType)
+  })
+
+  it('allows a supported attachment extension when the browser only reports generic binary MIME', () => {
+    expect(attachmentFileHint(new File(['notes'], 'notes.txt', { type: 'application/octet-stream' }))).toBeNull()
   })
 
   it('completes an uploaded media asset and returns its stable URL', async () => {

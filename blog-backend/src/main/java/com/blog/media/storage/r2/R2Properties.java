@@ -4,6 +4,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /** Server-only connection settings for Cloudflare R2's S3-compatible API. */
 @ConfigurationProperties(prefix = "blog.media.r2")
@@ -15,6 +17,7 @@ public class R2Properties {
     private String endpoint;
     private String publicBaseUrl;
     private Duration uploadUrlTtl = Duration.ofMinutes(10);
+    private String legacyBuckets;
 
     public String getAccountId() {
         return accountId;
@@ -72,6 +75,9 @@ public class R2Properties {
         this.uploadUrlTtl = uploadUrlTtl;
     }
 
+    public String getLegacyBuckets() { return legacyBuckets; }
+    public void setLegacyBuckets(String legacyBuckets) { this.legacyBuckets = trimmed(legacyBuckets); }
+
     public URI endpointUri() {
         String resolved = endpoint == null || endpoint.isBlank()
                 ? "https://" + accountId + ".r2.cloudflarestorage.com" : endpoint;
@@ -80,6 +86,33 @@ public class R2Properties {
 
     public URI publicBaseUri() {
         return URI.create(publicBaseUrl);
+    }
+
+    public URI publicBaseUri(String readableBucket) {
+        if (bucket != null && bucket.equals(readableBucket)) return publicBaseUri();
+        URI legacy = readableBuckets().get(readableBucket);
+        if (legacy == null) throw new IllegalArgumentException("R2 bucket is not configured for reading: " + readableBucket);
+        return legacy;
+    }
+
+    public Map<String, URI> readableBuckets() {
+        Map<String, URI> readable = new LinkedHashMap<>();
+        if (bucket != null && !bucket.isBlank() && publicBaseUrl != null && !publicBaseUrl.isBlank()) {
+            readable.put(bucket, publicBaseUri());
+        }
+        if (legacyBuckets == null || legacyBuckets.isBlank()) return Map.copyOf(readable);
+        for (String entry : legacyBuckets.split(",")) {
+            int separator = entry.indexOf('=');
+            if (separator < 1 || separator == entry.length() - 1) {
+                throw new IllegalArgumentException("R2 legacy buckets must use bucket=https://public.example format");
+            }
+            String legacyBucket = entry.substring(0, separator).strip();
+            URI publicBase = URI.create(entry.substring(separator + 1).strip());
+            if (legacyBucket.isBlank() || readable.putIfAbsent(legacyBucket, publicBase) != null) {
+                throw new IllegalArgumentException("R2 readable bucket names must be unique and nonblank");
+            }
+        }
+        return Map.copyOf(readable);
     }
 
     /** Validated only when the R2 provider is selected by {@link R2Configuration}. */
@@ -95,6 +128,10 @@ public class R2Properties {
         }
         validateHttpsUri(endpointUri(), "R2 endpoint");
         validateHttpsUri(publicBaseUri(), "R2 public base URL");
+        readableBuckets().forEach((readableBucket, publicBase) -> {
+            if (readableBucket.isBlank()) throw new IllegalArgumentException("R2 readable bucket is required");
+            validateHttpsUri(publicBase, "R2 public base URL for bucket " + readableBucket);
+        });
     }
 
     private static void validateHttpsUri(URI uri, String name) {

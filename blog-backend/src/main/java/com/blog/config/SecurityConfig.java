@@ -105,7 +105,8 @@ public class SecurityConfig {
                                                    SecurityContextRepository securityContextRepository,
                                                    SessionAuthenticationStrategy sessionAuthenticationStrategy,
                                                    SessionRegistry sessionRegistry,
-                                                   ObjectMapper objectMapper) throws Exception {
+                                                   ObjectMapper objectMapper,
+                                                   Environment environment) throws Exception {
         CsrfTokenRequestAttributeHandler csrfRequestHandler = new CsrfTokenRequestAttributeHandler();
         http
                 .csrf(csrf -> csrf
@@ -137,8 +138,7 @@ public class SecurityConfig {
                                 "Forbidden", "请求被拒绝")))
                 .headers(headers -> headers
                         .contentSecurityPolicy(csp -> csp.policyDirectives(
-                                "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
-                                        + "script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"))
+                                contentSecurityPolicy(environment)))
                         .frameOptions(frame -> frame.deny())
                         .referrerPolicy(referrer -> referrer.policy(
                                 ReferrerPolicyHeaderWriter.ReferrerPolicy.SAME_ORIGIN))
@@ -149,6 +149,51 @@ public class SecurityConfig {
                 .logout(AbstractHttpConfigurer::disable);
 
         return http.build();
+    }
+
+    static String contentSecurityPolicy(Environment environment) {
+        java.util.LinkedHashSet<String> uploadOrigins = new java.util.LinkedHashSet<>();
+        String endpoint = environment.getProperty("blog.media.r2.endpoint");
+        if (endpoint == null || endpoint.isBlank()) {
+            String accountId = environment.getProperty("blog.media.r2.account-id");
+            if (accountId != null && !accountId.isBlank()) {
+                endpoint = "https://" + accountId.strip() + ".r2.cloudflarestorage.com";
+            }
+        }
+        addOrigin(uploadOrigins, endpoint, "R2 upload endpoint");
+
+        java.util.LinkedHashSet<String> imageOrigins = new java.util.LinkedHashSet<>();
+        addOrigin(imageOrigins, environment.getProperty("blog.media.r2.public-base-url"), "R2 public base URL");
+        String legacyBuckets = environment.getProperty("blog.media.r2.legacy-buckets");
+        if (legacyBuckets != null && !legacyBuckets.isBlank()) {
+            for (String entry : legacyBuckets.split(",")) {
+                int separator = entry.indexOf('=');
+                if (separator > 0 && separator < entry.length() - 1) {
+                    addOrigin(imageOrigins, entry.substring(separator + 1), "R2 legacy public base URL");
+                }
+            }
+        }
+        String connectSources = uploadOrigins.isEmpty() ? "" : " " + String.join(" ", uploadOrigins);
+        String imageSources = imageOrigins.isEmpty() ? "" : " " + String.join(" ", imageOrigins);
+        return "default-src 'self'; img-src 'self' data:" + imageSources
+                + "; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'" + connectSources
+                + "; object-src 'none'; base-uri 'self'; frame-ancestors 'none'";
+    }
+
+    private static void addOrigin(java.util.Set<String> destinations, String configuredUrl, String name) {
+        if (configuredUrl == null || configuredUrl.isBlank()) return;
+        URI uri;
+        try {
+            uri = URI.create(configuredUrl.strip());
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException(name + " must be an absolute HTTPS URL", exception);
+        }
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getHost().isBlank()
+                || uri.getUserInfo() != null) {
+            throw new IllegalArgumentException(name + " must be an absolute HTTPS URL without credentials");
+        }
+        String origin = "https://" + uri.getHost() + (uri.getPort() < 0 ? "" : ":" + uri.getPort());
+        destinations.add(origin);
     }
 
     private static void writeProblem(HttpServletRequest request, HttpServletResponse response,

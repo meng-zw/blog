@@ -14,15 +14,18 @@ public interface ObjectStorage {
 
     StorageCapabilities capabilities();
 
-    UploadTicket createDirectUpload(ObjectUploadRequest request);
+    /** Creates the complete persisted location for a newly generated server-owned key. */
+    ObjectLocation locationForNewObject(String objectKey);
 
-    StoredObject upload(ObjectUploadRequest request, InputStream content) throws IOException;
+    UploadTicket createDirectUpload(ObjectLocation location, ObjectUploadRequest request);
 
-    StoredObject inspect(String objectKey);
+    StoredObject upload(ObjectLocation location, ObjectUploadRequest request, InputStream content) throws IOException;
 
-    InputStream openStream(String objectKey) throws IOException;
+    StoredObject inspect(ObjectLocation location);
 
-    URI resolvePublicUrl(String objectKey);
+    InputStream openStream(ObjectLocation location) throws IOException;
 
-    void delete(String objectKey) throws IOException;
+    URI resolvePublicUrl(ObjectLocation location);
+
+    void delete(ObjectLocation location) throws IOException;
 }

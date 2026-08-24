@@ -22,19 +22,27 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import jakarta.servlet.http.HttpServletRequest;
+import com.blog.shared.error.TooManyRequestsException;
 
 /** Administrative transport layer for the provider-neutral media upload protocol. */
 @RestController
 @RequestMapping("/admin/media")
 public class AdminMediaController {
     private final MediaApplicationService mediaApplicationService;
+    private final MediaUploadPlanRateLimiter uploadPlanRateLimiter;
 
-    public AdminMediaController(MediaApplicationService mediaApplicationService) {
+    public AdminMediaController(MediaApplicationService mediaApplicationService,
+                                MediaUploadPlanRateLimiter uploadPlanRateLimiter) {
         this.mediaApplicationService = mediaApplicationService;
+        this.uploadPlanRateLimiter = uploadPlanRateLimiter;
     }
 
     @PostMapping("/uploads")
-    public MediaUploadPlanResponse requestUpload(@Valid @RequestBody MediaUploadRequest request, Authentication authentication) {
+    public MediaUploadPlanResponse requestUpload(@Valid @RequestBody MediaUploadRequest request, Authentication authentication,
+                                                 HttpServletRequest servletRequest) {
+        if (!uploadPlanRateLimiter.tryAcquire(authentication.getName(), servletRequest.getRemoteAddr())) {
+            throw new TooManyRequestsException("上传请求过于频繁，请稍后重试");
+        }
         return mediaApplicationService.requestUpload(request, authentication.getName());
     }
 

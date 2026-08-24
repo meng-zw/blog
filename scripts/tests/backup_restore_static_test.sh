@@ -49,10 +49,14 @@ test_env="$repo_dir/.env.test.example"
 grep -Fq 'BLOG_MEDIA_PROVIDER: ${BLOG_MEDIA_PROVIDER:-local}' "$compose_file"
 grep -Fq 'BLOG_MEDIA_LOCAL_DIRECTORY: /app/data/media' "$compose_file"
 grep -Fq 'media-data:/app/data' "$compose_file"
-for variable in BLOG_MEDIA_R2_ACCOUNT_ID BLOG_MEDIA_R2_ACCESS_KEY_ID BLOG_MEDIA_R2_SECRET_ACCESS_KEY BLOG_MEDIA_R2_BUCKET BLOG_MEDIA_R2_ENDPOINT BLOG_MEDIA_R2_PUBLIC_BASE_URL BLOG_MEDIA_R2_UPLOAD_URL_TTL; do
+for variable in BLOG_MEDIA_R2_ACCOUNT_ID BLOG_MEDIA_R2_ACCESS_KEY_ID BLOG_MEDIA_R2_SECRET_ACCESS_KEY BLOG_MEDIA_R2_BUCKET BLOG_MEDIA_R2_ENDPOINT BLOG_MEDIA_R2_PUBLIC_BASE_URL BLOG_MEDIA_R2_LEGACY_BUCKETS BLOG_MEDIA_R2_UPLOAD_URL_TTL; do
   grep -Fq "$variable: \${$variable:-}" "$compose_file"
   grep -q "^$variable=" "$production_env"
 done
+grep -Fq 'MEDIA_UPLOAD_ORIGIN: ${MEDIA_UPLOAD_ORIGIN:-}' "$compose_file"
+grep -Fq 'MEDIA_PUBLIC_ORIGINS: ${MEDIA_PUBLIC_ORIGINS:-}' "$compose_file"
+grep -q '^MEDIA_UPLOAD_ORIGIN=' "$production_env"
+grep -q '^MEDIA_PUBLIC_ORIGINS=' "$production_env"
 grep -Fq 'BLOG_MEDIA_PROVIDER=local' "$production_env"
 grep -Fq 'BLOG_MEDIA_PROVIDER=local' "$test_env"
 grep -Eq '^BLOG_MEDIA_R2_ACCESS_KEY_ID=$' "$production_env"

@@ -27,7 +27,7 @@ class LocalObjectStorageTest {
         String key = "inline-images/" + UUID.randomUUID() + ".png";
         byte[] content = "image-content".getBytes(StandardCharsets.UTF_8);
 
-        StoredObject stored = storage.upload(new ObjectUploadRequest(key, "image/png", content.length),
+        StoredObject stored = storage.upload(location(key), new ObjectUploadRequest(key, "image/png", content.length),
                 new ByteArrayInputStream(content));
 
         assertThat(storage.provider()).isEqualTo(StorageProvider.LOCAL);
@@ -48,19 +48,19 @@ class LocalObjectStorageTest {
         LocalObjectStorage storage = storage();
         String key = "attachments/" + UUID.randomUUID() + ".pdf";
         byte[] content = "%PDF-1.7".getBytes(StandardCharsets.US_ASCII);
-        storage.upload(new ObjectUploadRequest(key, "application/pdf", content.length), new ByteArrayInputStream(content));
+        storage.upload(location(key), new ObjectUploadRequest(key, "application/pdf", content.length), new ByteArrayInputStream(content));
 
-        StoredObject inspected = storage.inspect(key);
+        StoredObject inspected = storage.inspect(location(key));
 
         assertThat(inspected.key()).isEqualTo(key);
         assertThat(inspected.contentType()).isEqualTo("application/pdf");
         assertThat(inspected.byteSize()).isEqualTo(content.length);
-        try (var input = storage.openStream(key)) {
+        try (var input = storage.openStream(location(key))) {
             assertThat(input.readAllBytes()).isEqualTo(content);
         }
-        storage.delete(key);
+        storage.delete(location(key));
         assertThat(Files.exists(mediaDirectory.resolve(key))).isFalse();
-        storage.delete(key);
+        storage.delete(location(key));
     }
 
     @Test
@@ -68,7 +68,7 @@ class LocalObjectStorageTest {
         LocalObjectStorage storage = storage();
         String key = "inline-images/" + UUID.randomUUID() + ".gif";
 
-        assertThat(storage.resolvePublicUrl(key)).hasToString("/api/media/" + key);
+        assertThat(storage.resolvePublicUrl(location(key))).hasToString("/api/media/" + key);
     }
 
     @Test
@@ -77,18 +77,18 @@ class LocalObjectStorageTest {
         String key = UUID.randomUUID() + ".png";
         byte[] content = {1};
 
-        storage.upload(new ObjectUploadRequest(key, "image/png", content.length), new ByteArrayInputStream(content));
+        storage.upload(location(key), new ObjectUploadRequest(key, "image/png", content.length), new ByteArrayInputStream(content));
 
-        assertThat(storage.inspect(key).byteSize()).isEqualTo(1);
+        assertThat(storage.inspect(location(key)).byteSize()).isEqualTo(1);
     }
 
     @Test
     void rejectsTraversalAndMalformedKeys() {
         LocalObjectStorage storage = storage();
 
-        assertThatIllegalArgumentException().isThrownBy(() -> storage.inspect("../private.png"))
+        assertThatIllegalArgumentException().isThrownBy(() -> storage.inspect(location("../private.png")))
                 .withMessage("Invalid storage key");
-        assertThatIllegalArgumentException().isThrownBy(() -> storage.resolvePublicUrl("inline-images/not-a-uuid.png"))
+        assertThatIllegalArgumentException().isThrownBy(() -> storage.resolvePublicUrl(location("inline-images/not-a-uuid.png")))
                 .withMessage("Invalid storage key");
     }
 
@@ -97,7 +97,7 @@ class LocalObjectStorageTest {
         LocalObjectStorage storage = storage();
         String key = "avatars/" + UUID.randomUUID() + ".png";
 
-        assertThatThrownBy(() -> storage.inspect(key))
+        assertThatThrownBy(() -> storage.inspect(location(key)))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining(key);
     }
@@ -107,7 +107,7 @@ class LocalObjectStorageTest {
         LocalObjectStorage storage = storage();
         String key = "tool-covers/" + UUID.randomUUID() + ".png";
 
-        assertThatIllegalArgumentException().isThrownBy(() -> storage.upload(
+        assertThatIllegalArgumentException().isThrownBy(() -> storage.upload(location(key),
                         new ObjectUploadRequest(key, "image/png", 2), new ByteArrayInputStream(new byte[]{1})))
                 .withMessage("Uploaded object size does not match declared size");
     }
@@ -116,5 +116,9 @@ class LocalObjectStorageTest {
         MediaProperties properties = new MediaProperties();
         properties.setDirectory(mediaDirectory);
         return new LocalObjectStorage(properties);
+    }
+
+    private static ObjectLocation location(String objectKey) {
+        return new ObjectLocation(StorageProvider.LOCAL, "", objectKey);
     }
 }

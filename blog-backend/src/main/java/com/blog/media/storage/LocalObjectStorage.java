@@ -51,12 +51,19 @@ public class LocalObjectStorage implements ObjectStorage {
     }
 
     @Override
-    public UploadTicket createDirectUpload(ObjectUploadRequest request) {
+    public ObjectLocation locationForNewObject(String objectKey) {
+        validateObjectKey(objectKey);
+        return new ObjectLocation(StorageProvider.LOCAL, "", objectKey);
+    }
+
+    @Override
+    public UploadTicket createDirectUpload(ObjectLocation location, ObjectUploadRequest request) {
         throw new UnsupportedOperationException("Local object storage does not support direct uploads");
     }
 
     @Override
-    public StoredObject upload(ObjectUploadRequest request, InputStream content) throws IOException {
+    public StoredObject upload(ObjectLocation location, ObjectUploadRequest request, InputStream content) throws IOException {
+        validateLocation(location, request.objectKey());
         if (content == null) {
             throw new IllegalArgumentException("Object content is required");
         }
@@ -85,7 +92,8 @@ public class LocalObjectStorage implements ObjectStorage {
     }
 
     @Override
-    public StoredObject inspect(String objectKey) {
+    public StoredObject inspect(ObjectLocation location) {
+        String objectKey = localKey(location);
         Path path = existingObjectPath(objectKey);
         try {
             return new StoredObject(objectKey, contentType(objectKey), Files.size(path), sha256(path));
@@ -95,18 +103,21 @@ public class LocalObjectStorage implements ObjectStorage {
     }
 
     @Override
-    public InputStream openStream(String objectKey) throws IOException {
+    public InputStream openStream(ObjectLocation location) throws IOException {
+        String objectKey = localKey(location);
         return Files.newInputStream(existingObjectPath(objectKey));
     }
 
     @Override
-    public URI resolvePublicUrl(String objectKey) {
+    public URI resolvePublicUrl(ObjectLocation location) {
+        String objectKey = localKey(location);
         validateObjectKey(objectKey);
         return URI.create("/api/media/" + objectKey);
     }
 
     @Override
-    public void delete(String objectKey) throws IOException {
+    public void delete(ObjectLocation location) throws IOException {
+        String objectKey = localKey(location);
         Files.deleteIfExists(objectPath(objectKey));
     }
 
@@ -138,6 +149,21 @@ public class LocalObjectStorage implements ObjectStorage {
         if (objectKey == null || !OBJECT_KEY.matcher(objectKey).matches()) {
             throw new IllegalArgumentException("Invalid storage key");
         }
+    }
+
+    private static String localKey(ObjectLocation location) {
+        validateLocation(location, location == null ? null : location.objectKey());
+        return location.objectKey();
+    }
+
+    private static void validateLocation(ObjectLocation location, String expectedKey) {
+        if (location == null || location.provider() != StorageProvider.LOCAL || !location.bucket().isEmpty()) {
+            throw new IllegalArgumentException("Invalid Local object location");
+        }
+        if (!location.objectKey().equals(expectedKey)) {
+            throw new IllegalArgumentException("Object request key does not match its location");
+        }
+        validateObjectKey(location.objectKey());
     }
 
     private static void moveAtomically(Path temporary, Path destination) throws IOException {

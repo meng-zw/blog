@@ -33,8 +33,11 @@ blog:
   public-base-url: ${BLOG_PUBLIC_BASE_URL:https://localhost}
   media:
     provider: ${BLOG_MEDIA_PROVIDER:local}
-    bucket: ${BLOG_MEDIA_R2_BUCKET:}
     directory: ${BLOG_MEDIA_LOCAL_DIRECTORY:${BLOG_MEDIA_DIR:./media}}
+    upload-plan-rate-limit:
+      maximum-requests: ${BLOG_MEDIA_UPLOAD_PLAN_RATE_LIMIT_MAX_REQUESTS:30}
+      window: ${BLOG_MEDIA_UPLOAD_PLAN_RATE_LIMIT_WINDOW:1m}
+      maximum-entries: ${BLOG_MEDIA_UPLOAD_PLAN_RATE_LIMIT_MAX_ENTRIES:10000}
     r2:
       account-id: ${BLOG_MEDIA_R2_ACCOUNT_ID:}
       access-key-id: ${BLOG_MEDIA_R2_ACCESS_KEY_ID:}
@@ -42,6 +45,7 @@ blog:
       bucket: ${BLOG_MEDIA_R2_BUCKET:}
       endpoint: ${BLOG_MEDIA_R2_ENDPOINT:}
       public-base-url: ${BLOG_MEDIA_R2_PUBLIC_BASE_URL:}
+      legacy-buckets: ${BLOG_MEDIA_R2_LEGACY_BUCKETS:}
       upload-url-ttl: ${BLOG_MEDIA_R2_UPLOAD_URL_TTL:10m}
   admin:
     bootstrap:
