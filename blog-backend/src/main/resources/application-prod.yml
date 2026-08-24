@@ -29,7 +29,6 @@ blog:
       bucket: ${BLOG_MEDIA_R2_BUCKET:}
       endpoint: ${BLOG_MEDIA_R2_ENDPOINT:}
       public-base-url: ${BLOG_MEDIA_R2_PUBLIC_BASE_URL:}
-      region: ${BLOG_MEDIA_R2_REGION:auto}
       upload-url-ttl: ${BLOG_MEDIA_R2_UPLOAD_URL_TTL:10m}
 management:
   endpoint:

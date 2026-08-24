@@ -66,4 +66,12 @@ web_block=$(sed -n '/^  web:/,/^volumes:/p' "$compose_file")
 ! grep -Fq 'BLOG_MEDIA_R2_' <<<"$web_block"
 ! grep -Fq 'BLOG_MEDIA_R2_' "$repo_dir/blog-frontend/Dockerfile"
 
+# R2 always uses S3's required `auto` region internally. Neither base nor
+# production configuration may reintroduce a user-configurable region value.
+if rg -n 'BLOG_MEDIA_R2_REGION|^\s+region:' "$repo_dir/blog-backend/src/main/resources/application.yml" \
+  "$repo_dir/blog-backend/src/main/resources/application-prod.yml"; then
+  printf 'R2 region must remain fixed to auto and must not be configurable\n' >&2
+  exit 1
+fi
+
 printf 'backup/restore static checks passed\n'
