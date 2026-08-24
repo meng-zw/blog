@@ -83,12 +83,16 @@ class AdminCloudreveControllerTest {
     void onlyAdministratorWithCsrfCanAuthorizeOrDisconnect() throws Exception {
         MockHttpSession session = new MockHttpSession();
         stubAdmin();
+        when(properties.isEnabled()).thenReturn(true);
         when(tokenService.beginAuthorization(eq(7L), eq(session.getId())))
                 .thenReturn(URI.create("https://cloudreve.example/session/authorize?state=opaque-state"));
 
         mockMvc.perform(post("/api/admin/media/cloudreve/authorize").contextPath("/api").with(csrf()))
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(post("/api/admin/media/cloudreve/authorize").contextPath("/api")
+                        .session(session).with(user("owner").roles("ADMIN")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/admin/media/cloudreve/disconnect").contextPath("/api")
                         .session(session).with(user("owner").roles("ADMIN")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(post("/api/admin/media/cloudreve/authorize").contextPath("/api")
@@ -108,6 +112,22 @@ class AdminCloudreveControllerTest {
     }
 
     @Test
+    void rejectsAuthorizationWhenCloudreveIsNotEffectivelyConfiguredWithoutLeakingConfiguration() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        stubAdmin();
+        when(properties.isEnabled()).thenReturn(false);
+
+        mockMvc.perform(post("/api/admin/media/cloudreve/authorize").contextPath("/api")
+                        .session(session).with(user("owner").roles("ADMIN")).with(csrf()))
+                .andExpect(status().isConflict())
+                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
+                .andExpect(jsonPath("$.detail").value(not(containsString("client"))))
+                .andExpect(jsonPath("$.detail").value(not(containsString("secret"))))
+                .andExpect(jsonPath("$.detail").value(not(containsString("base"))));
+        verify(tokenService, never()).beginAuthorization(eq(7L), eq(session.getId()));
+    }
+
+    @Test
     void nonAdministratorCannotReadOrMutateConnection() throws Exception {
         mockMvc.perform(get("/api/admin/media/cloudreve").contextPath("/api").with(user("reader").roles("USER")))
                 .andExpect(status().isForbidden());
@@ -121,6 +141,7 @@ class AdminCloudreveControllerTest {
     void authorizationErrorsAreSanitized() throws Exception {
         MockHttpSession session = new MockHttpSession();
         stubAdmin();
+        when(properties.isEnabled()).thenReturn(true);
         when(tokenService.beginAuthorization(eq(7L), eq(session.getId())))
                 .thenThrow(new RuntimeException("access_token=private client_secret=private"));
 

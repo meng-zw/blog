@@ -2,6 +2,7 @@ package com.blog.shared.error;
 
 import com.blog.media.storage.ObjectStorageException;
 import com.blog.media.storage.cloudreve.CloudreveAuthorizationRequiredException;
+import com.blog.media.storage.cloudreve.CloudreveConfigurationRequiredException;
 import com.blog.media.storage.cloudreve.CloudreveOAuthClient;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.MDC;
@@ -62,6 +63,13 @@ public class GlobalExceptionHandler {
                                                                          HttpServletRequest request) {
         return problem(HttpStatus.BAD_REQUEST, "Cloudreve authorization required",
                 "Cloudreve 授权无效或已过期，请重新发起授权", request, null);
+    }
+
+    @ExceptionHandler(CloudreveConfigurationRequiredException.class)
+    ResponseEntity<ProblemDetail> handleCloudreveConfigurationRequired(CloudreveConfigurationRequiredException exception,
+                                                                         HttpServletRequest request) {
+        return problem(HttpStatus.CONFLICT, "Cloudreve unavailable",
+                "Cloudreve 当前不可用，无法发起授权", request, null);
     }
 
     @ExceptionHandler({CloudreveOAuthClient.OAuthUnavailableException.class,

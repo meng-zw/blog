@@ -4,6 +4,7 @@ import com.blog.identity.AdminAccount;
 import com.blog.identity.AdminAccountRepository;
 import com.blog.media.storage.cloudreve.dto.CloudreveConnectionResponse;
 import org.springframework.http.ResponseEntity;
+import org.springframework.core.env.Environment;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,20 +25,23 @@ public class AdminCloudreveController {
     private final CloudreveConnectionRepository connections;
     private final CloudreveProperties properties;
     private final AdminAccountRepository adminAccounts;
+    private final Environment environment;
 
     public AdminCloudreveController(CloudreveTokenService tokenService, CloudreveConnectionRepository connections,
-                                    CloudreveProperties properties, AdminAccountRepository adminAccounts) {
+                                    CloudreveProperties properties, AdminAccountRepository adminAccounts,
+                                    Environment environment) {
         this.tokenService = tokenService;
         this.connections = connections;
         this.properties = properties;
         this.adminAccounts = adminAccounts;
+        this.environment = environment;
     }
 
     @GetMapping
     public CloudreveConnectionResponse status() {
         CloudreveConnection connection = connections.findSingleton().orElse(null);
         return new CloudreveConnectionResponse(
-                properties.isEnabled(),
+                isEffectivelyConfigured(),
                 connection == null ? CloudreveConnectionStatus.DISCONNECTED : connection.getStatus(),
                 connection == null ? null : connection.getAuthorizedSubject(),
                 connection == null ? null : connection.getAuthorizedDisplayName(),
@@ -49,6 +53,7 @@ public class AdminCloudreveController {
 
     @PostMapping("/authorize")
     public Map<String, String> authorize(Authentication authentication, HttpServletRequest request) {
+        if (!isEffectivelyConfigured()) throw new CloudreveConfigurationRequiredException();
         URI redirectUri = tokenService.beginAuthorization(adminId(authentication), existingSessionId(request));
         return Map.of("redirect_url", redirectUri.toString());
     }
@@ -75,5 +80,10 @@ public class AdminCloudreveController {
     private static List<String> scopes(String storedScopes) {
         if (storedScopes == null || storedScopes.isBlank()) return List.of();
         return List.of(storedScopes.trim().split("\\s+"));
+    }
+
+    private boolean isEffectivelyConfigured() {
+        return CloudreveConfiguration.isEffectivelyConfigured(properties.isEnabled(),
+                environment.getProperty("blog.media.provider"));
     }
 }

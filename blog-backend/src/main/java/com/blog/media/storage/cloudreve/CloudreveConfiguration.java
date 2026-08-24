@@ -27,8 +27,13 @@ public class CloudreveConfiguration {
         @Override
         public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
             String provider = context.getEnvironment().getProperty("blog.media.provider");
-            return Boolean.parseBoolean(context.getEnvironment().getProperty("blog.media.cloudreve.enabled", "false"))
-                    || "cloudreve".equalsIgnoreCase(provider == null ? "" : provider.trim());
+            boolean enabled = Boolean.parseBoolean(
+                    context.getEnvironment().getProperty("blog.media.cloudreve.enabled", "false"));
+            return isEffectivelyConfigured(enabled, provider);
         }
+    }
+
+    static boolean isEffectivelyConfigured(boolean enabled, String provider) {
+        return enabled || "cloudreve".equalsIgnoreCase(provider == null ? "" : provider.trim());
     }
 }

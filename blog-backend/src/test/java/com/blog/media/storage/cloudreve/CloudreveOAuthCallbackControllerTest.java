@@ -7,7 +7,11 @@ import com.blog.identity.AdminUserDetailsService;
 import com.blog.identity.LoginAttemptService;
 import com.blog.shared.error.GlobalExceptionHandler;
 import com.blog.shared.web.TraceIdFilter;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.autoconfigure.web.servlet.ServletWebServerFactoryAutoConfiguration;
@@ -24,6 +28,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -61,7 +66,9 @@ class CloudreveOAuthCallbackControllerTest {
                         .session(session).with(user("owner").roles("ADMIN"))
                         .param("code", "authorization-code").param("state", "server-state"))
                 .andExpect(status().isFound())
-                .andExpect(header().string("Location", "/admin/settings?cloudreve=connected"));
+                .andExpect(header().string("Location", "/admin/settings?cloudreve=connected"))
+                .andExpect(header().string("Referrer-Policy", "no-referrer"))
+                .andExpect(header().string("Cache-Control", "no-store"));
         verify(tokenService).completeAuthorization("authorization-code", "server-state", 7L, session.getId());
     }
 
@@ -69,15 +76,33 @@ class CloudreveOAuthCallbackControllerTest {
     void callbackRedirectsToFixedErrorWithoutReflectingProviderOrInternalDetails() throws Exception {
         MockHttpSession session = new MockHttpSession();
         stubAdmin();
+        Logger logger = (Logger) LoggerFactory.getLogger(CloudreveOAuthCallbackController.class);
+        ListAppender<ILoggingEvent> logEvents = new ListAppender<>();
+        logEvents.start();
+        logger.addAppender(logEvents);
         doThrow(new RuntimeException("error_description=private access_token=secret state=server-state"))
                 .when(tokenService).completeAuthorization(eq("private-code"), eq("server-state"), eq(7L), eq(session.getId()));
 
-        mockMvc.perform(get("/api/admin/media/cloudreve/callback").contextPath("/api")
+        try {
+            var result = mockMvc.perform(get("/api/admin/media/cloudreve/callback").contextPath("/api")
                         .session(session).with(user("owner").roles("ADMIN"))
                         .param("code", "private-code").param("state", "server-state")
                         .param("error_description", "private provider explanation"))
                 .andExpect(status().isFound())
-                .andExpect(header().string("Location", "/admin/settings?cloudreve=authorization_failed"));
+                .andExpect(header().string("Location", "/admin/settings?cloudreve=authorization_failed"))
+                .andExpect(header().string("Referrer-Policy", "no-referrer"))
+                .andExpect(header().string("Cache-Control", "no-store"))
+                .andReturn();
+
+            assertThat(logEvents.list).hasSize(1);
+            String event = logEvents.list.getFirst().getFormattedMessage();
+            assertThat(event).contains("category=authorization-failed")
+                    .matches(".*correlationId=[a-f0-9]{32}.*")
+                    .doesNotContain("private", "access_token", "state=", "error_description");
+        } finally {
+            logger.detachAppender(logEvents);
+            logEvents.stop();
+        }
     }
 
     private void stubAdmin() {

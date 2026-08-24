@@ -7,16 +7,22 @@ import jakarta.servlet.http.HttpSession;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.CacheControl;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.UUID;
+
 /** OAuth callback that consumes an authorization transaction bound to the initiating administrator session. */
 @RestController
 @RequestMapping("/admin/media/cloudreve/callback")
 public class CloudreveOAuthCallbackController {
+    private static final Logger log = LoggerFactory.getLogger(CloudreveOAuthCallbackController.class);
     private static final String CONNECTED_REDIRECT = "/admin/settings?cloudreve=connected";
     private static final String AUTHORIZATION_FAILED_REDIRECT = "/admin/settings?cloudreve=authorization_failed";
 
@@ -35,8 +41,9 @@ public class CloudreveOAuthCallbackController {
         try {
             tokenService.completeAuthorization(code, state, adminId(authentication), existingSessionId(request));
             return redirect(CONNECTED_REDIRECT);
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException exception) {
             // OAuth error values and provider failures are deliberately never reflected to the browser.
+            logAuthorizationFailure(exception);
             return redirect(AUTHORIZATION_FAILED_REDIRECT);
         }
     }
@@ -55,6 +62,21 @@ public class CloudreveOAuthCallbackController {
     }
 
     private static ResponseEntity<Void> redirect(String location) {
-        return ResponseEntity.status(HttpStatus.FOUND).header(HttpHeaders.LOCATION, location).build();
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .header(HttpHeaders.LOCATION, location)
+                .header("Referrer-Policy", "no-referrer")
+                .cacheControl(CacheControl.noStore())
+                .build();
+    }
+
+    private static void logAuthorizationFailure(RuntimeException exception) {
+        String correlationId = UUID.randomUUID().toString().replace("-", "");
+        String exceptionType = exception instanceof CloudreveAuthorizationRequiredException
+                || exception instanceof CloudreveConfigurationRequiredException
+                || exception instanceof CloudreveOAuthClient.OAuthProtocolException
+                || exception instanceof CloudreveOAuthClient.OAuthUnavailableException
+                ? exception.getClass().getSimpleName() : "RuntimeException";
+        log.warn("Cloudreve OAuth callback failed category=authorization-failed correlationId={} exceptionType={}",
+                correlationId, exceptionType);
     }
 }
