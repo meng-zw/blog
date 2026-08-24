@@ -21,35 +21,58 @@ const uploadProgress = ref(0)
 const uploadError = ref('')
 let editor: { getValue?: () => string, setValue?: (value: string) => void, insertValue?: (value: string) => void, destroy?: () => void } | undefined
 type VditorUploadHandler = (files: File[]) => string | null | Promise<string> | Promise<null>
+let destroyed = false
 
 function escapedAltText(filename: string): string {
   const basename = filename.replace(/\.[^.]+$/, '') || '图片'
   return basename.replace(/[\\\[\]]/g, '\\$&').replace(/[\r\n]+/g, ' ').trim() || '图片'
 }
 
+function captureSelection(): Range | undefined {
+  const selection = window.getSelection()
+  return selection && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : undefined
+}
+
+function restoreSelection(range: Range | undefined): void {
+  if (!range) return
+  const selection = window.getSelection()
+  if (!selection) return
+  selection.removeAllRanges()
+  selection.addRange(range)
+}
+
 async function handleUpload(files: File[]): Promise<string | null> {
   if (uploading.value) return '图片正在上传，请稍候。'
-  const file = files[0]
-  if (!file) return null
-  const hint = imageFileHint(file)
-  if (hint) return hint
+  const acceptedFiles = files.filter((file) => imageFileHint(file) === null)
+  const invalidFile = files.find((file) => imageFileHint(file) !== null)
+  if (invalidFile) return imageFileHint(invalidFile)!
+  if (acceptedFiles.length === 0) return null
 
   uploading.value = true
   uploadProgress.value = 0
   uploadError.value = ''
+  const originalSelection = captureSelection()
   try {
-    const media = await uploadMedia(file, 'INLINE_IMAGE', (progress) => { uploadProgress.value = progress })
-    editor?.insertValue?.(`\n![${escapedAltText(file.name)}](${media.url})\n`)
+    for (const [index, file] of acceptedFiles.entries()) {
+      const media = await uploadMedia(file, 'INLINE_IMAGE', (progress) => {
+        uploadProgress.value = Math.round(((index + progress / 100) / acceptedFiles.length) * 100)
+      })
+      if (destroyed) return null
+      if (index === 0) restoreSelection(originalSelection)
+      editor?.insertValue?.(`\n![${escapedAltText(file.name)}](${media.url})\n`)
+    }
     return null
   } catch {
+    if (destroyed) return null
     uploadError.value = '图片上传失败，请检查网络后重试。'
     return uploadError.value
   } finally {
-    uploading.value = false
+    if (!destroyed) uploading.value = false
   }
 }
 
 onMounted(async () => {
+  destroyed = false
   try {
     const [{ default: Vditor }] = await Promise.all([import('vditor'), import('vditor/dist/index.css')])
     if (!host.value) return
@@ -70,7 +93,7 @@ onMounted(async () => {
 })
 
 watch(() => props.modelValue, (value) => { if (editor?.getValue?.() !== value) editor?.setValue?.(value) })
-onBeforeUnmount(() => editor?.destroy?.())
+onBeforeUnmount(() => { destroyed = true; editor?.destroy?.() })
 function fallbackInput(event: Event): void { emit('update:modelValue', (event.target as HTMLTextAreaElement).value) }
 </script>
 <style scoped>

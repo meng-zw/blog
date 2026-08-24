@@ -120,4 +120,25 @@ describe('media uploader', () => {
     expect(requests).toHaveLength(2)
     expect(completeMediaUpload).toHaveBeenCalledOnce()
   })
+
+  it('does not issue a second PUT when completion fails after a successful upload', async () => {
+    vi.mocked(requestMediaUpload).mockResolvedValue(directPlan)
+    vi.mocked(completeMediaUpload).mockRejectedValue(new Error('complete unavailable'))
+
+    await expect(uploadMedia(new File(['data'], 'diagram.png', { type: 'image/png' }), 'INLINE_IMAGE'))
+      .rejects.toThrow('complete unavailable')
+
+    expect(requests).toHaveLength(1)
+    expect(completeMediaUpload).toHaveBeenCalledOnce()
+  })
+
+  it('does not retry a non-transient PUT response based on its actual status', async () => {
+    behavior = [{ status: 400 }]
+    vi.mocked(requestMediaUpload).mockResolvedValue(directPlan)
+
+    await expect(uploadMedia(new File(['data'], 'diagram.png', { type: 'image/png' }), 'INLINE_IMAGE'))
+      .rejects.toThrow('HTTP 400')
+
+    expect(requests).toHaveLength(1)
+  })
 })

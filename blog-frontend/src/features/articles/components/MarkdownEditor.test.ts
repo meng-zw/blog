@@ -27,7 +27,11 @@ async function editorUpload() {
 }
 
 describe('MarkdownEditor media uploads', () => {
-  beforeEach(() => { constructorOptions = undefined; insertValue.mockReset(); vi.mocked(uploadMedia).mockReset() })
+  beforeEach(() => {
+    constructorOptions = undefined
+    insertValue.mockReset()
+    vi.mocked(uploadMedia).mockReset()
+  })
   afterEach(() => vi.restoreAllMocks())
 
   it('uploads pasted PNG images with progress and inserts a stable escaped Markdown URL', async () => {
@@ -65,5 +69,64 @@ describe('MarkdownEditor media uploads', () => {
       .resolves.toContain('仅支持 PNG、JPEG 或 GIF')
     expect(uploadMedia).not.toHaveBeenCalled()
     wrapper.unmount()
+  })
+
+  it('uploads every pasted image sequentially instead of silently dropping later files', async () => {
+    vi.mocked(uploadMedia)
+      .mockResolvedValueOnce({ mediaId: 11, filename: 'one.png', contentType: 'image/png', byteSize: 1, width: 1, height: 1, status: 'READY', purpose: 'INLINE_IMAGE', url: '/api/media/assets/11' })
+      .mockResolvedValueOnce({ mediaId: 12, filename: 'two.png', contentType: 'image/png', byteSize: 1, width: 1, height: 1, status: 'READY', purpose: 'INLINE_IMAGE', url: '/api/media/assets/12' })
+    const { wrapper, handler } = await editorUpload()
+
+    await expect(handler([
+      new File(['1'], 'one.png', { type: 'image/png' }),
+      new File(['2'], 'two.png', { type: 'image/png' })
+    ])).resolves.toBeNull()
+
+    expect(uploadMedia).toHaveBeenCalledTimes(2)
+    expect(insertValue).toHaveBeenNthCalledWith(1, '\n![one](/api/media/assets/11)\n')
+    expect(insertValue).toHaveBeenNthCalledWith(2, '\n![two](/api/media/assets/12)\n')
+    wrapper.unmount()
+  })
+
+  it('restores the original selection before inserting after an asynchronous upload', async () => {
+    const initialRange = document.createRange()
+    const editorText = document.createTextNode('原位置')
+    document.body.append(editorText)
+    initialRange.setStart(editorText, 1)
+    initialRange.collapse(true)
+    const selection = window.getSelection()!
+    selection.removeAllRanges()
+    selection.addRange(initialRange)
+    let resolveUpload!: (value: { mediaId: number, filename: string, contentType: string, byteSize: number, width: number, height: number, status: 'READY', purpose: 'INLINE_IMAGE', url: string }) => void
+    vi.mocked(uploadMedia).mockImplementation(() => new Promise((resolve) => { resolveUpload = resolve }))
+    const { wrapper, handler } = await editorUpload()
+    const result = handler([new File(['data'], 'cursor.png', { type: 'image/png' })])
+    const movedRange = document.createRange()
+    movedRange.setStart(editorText, 3)
+    movedRange.collapse(true)
+    selection.removeAllRanges()
+    selection.addRange(movedRange)
+    const addRange = vi.spyOn(selection, 'addRange')
+
+    resolveUpload({ mediaId: 15, filename: 'cursor.png', contentType: 'image/png', byteSize: 1, width: 1, height: 1, status: 'READY', purpose: 'INLINE_IMAGE', url: '/api/media/assets/15' })
+    await result
+
+    expect(addRange).toHaveBeenCalled()
+    expect(addRange.mock.calls[0]?.[0].startOffset).toBe(1)
+    expect(insertValue).toHaveBeenCalledWith('\n![cursor](/api/media/assets/15)\n')
+    editorText.remove()
+    wrapper.unmount()
+  })
+
+  it('does not insert a completed upload after the editor has unmounted', async () => {
+    let resolveUpload!: (value: { mediaId: number, filename: string, contentType: string, byteSize: number, width: number, height: number, status: 'READY', purpose: 'INLINE_IMAGE', url: string }) => void
+    vi.mocked(uploadMedia).mockImplementation(() => new Promise((resolve) => { resolveUpload = resolve }))
+    const { wrapper, handler } = await editorUpload()
+    const result = handler([new File(['data'], 'gone.png', { type: 'image/png' })])
+    wrapper.unmount()
+
+    resolveUpload({ mediaId: 16, filename: 'gone.png', contentType: 'image/png', byteSize: 1, width: 1, height: 1, status: 'READY', purpose: 'INLINE_IMAGE', url: '/api/media/assets/16' })
+    await expect(result).resolves.toBeNull()
+    expect(insertValue).not.toHaveBeenCalled()
   })
 })

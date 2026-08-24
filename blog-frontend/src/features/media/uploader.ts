@@ -8,6 +8,15 @@ export interface UploadMediaOptions {
   retries?: number
 }
 
+class UploadTransportError extends Error {
+  readonly status: number | undefined
+
+  constructor(message: string, status?: number) {
+    super(message)
+    this.status = status
+  }
+}
+
 function readCsrfToken(): string | undefined {
   for (const part of document.cookie.split(';')) {
     const separator = part.indexOf('=')
@@ -47,16 +56,35 @@ function uploadPlanContent(plan: MediaUploadPlanResponse, file: File, onProgress
         resolve()
         return
       }
-      reject(new Error(`上传图片失败（HTTP ${request.status || '网络错误'}），请检查网络后重试。`))
+      reject(new UploadTransportError(`上传图片失败（HTTP ${request.status || '网络错误'}），请检查网络后重试。`, request.status))
     }
-    request.onerror = () => reject(new Error('上传图片失败，请检查网络后重试。'))
+    request.onerror = () => reject(new UploadTransportError('上传图片失败，请检查网络后重试。'))
     request.send(file)
   })
 }
 
 function isRetryable(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : ''
-  return !/HTTP (4\d\d)/.test(message)
+  if (!(error instanceof UploadTransportError)) return false
+  return error.status === undefined || error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500
+}
+
+async function uploadPlanContentWithRetry(
+  plan: MediaUploadPlanResponse,
+  file: File,
+  onProgress: UploadProgressHandler | undefined,
+  retries: number
+): Promise<void> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      await uploadPlanContent(plan, file, onProgress)
+      return
+    } catch (error: unknown) {
+      lastError = error
+      if (attempt >= retries || !isRetryable(error)) break
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('上传图片失败，请检查网络后重试。')
 }
 
 /**
@@ -71,15 +99,8 @@ export async function uploadMedia(
 ): Promise<MediaAssetResponse> {
   const plan = await requestMediaUpload(file, purpose)
   const retries = Math.max(0, options.retries ?? 1)
-  let lastError: unknown
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    try {
-      await uploadPlanContent(plan, file, onProgress)
-      return await completeMediaUpload(plan.mediaId)
-    } catch (error: unknown) {
-      lastError = error
-      if (attempt >= retries || !isRetryable(error)) break
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error('上传图片失败，请检查网络后重试。')
+  await uploadPlanContentWithRetry(plan, file, onProgress, retries)
+  // Completion is idempotent server-side, but it is deliberately outside the PUT retry loop:
+  // a failed confirmation must never upload the same object again.
+  return completeMediaUpload(plan.mediaId)
 }
