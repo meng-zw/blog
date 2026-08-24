@@ -11,12 +11,14 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.zip.CRC32;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -196,6 +198,23 @@ class MediaStorageServiceTest {
         verify(storage).loadPath(key);
     }
 
+    @Test
+    void resolvesOverlappingStorageKeysFromLocalProviderOnly() {
+        MediaAssetRepository repository = mock(MediaAssetRepository.class);
+        String key = "123e4567-e89b-12d3-a456-426614174000.png";
+        MediaAsset local = mediaAsset(StorageProvider.LOCAL, "", key);
+        MediaAsset r2 = mediaAsset(StorageProvider.R2, "blog-media", key);
+        when(repository.findByStorageKey(key)).thenReturn(Optional.of(r2));
+        when(repository.findByProviderAndBucketAndStorageKey(StorageProvider.LOCAL, "", key))
+                .thenReturn(Optional.of(local));
+        MediaStorageService service = new MediaStorageService(repository, properties());
+
+        assertThat(service.findByStorageKey(key)).isSameAs(local);
+
+        verify(repository).findByProviderAndBucketAndStorageKey(StorageProvider.LOCAL, "", key);
+        verify(repository, never()).findByStorageKey(key);
+    }
+
     private MediaProperties properties() {
         MediaProperties properties = new MediaProperties();
         properties.setDirectory(mediaDirectory);
@@ -206,6 +225,14 @@ class MediaStorageServiceTest {
         MediaAssetRepository repository = mock(MediaAssetRepository.class);
         when(repository.save(any(MediaAsset.class))).thenAnswer(invocation -> invocation.getArgument(0));
         return repository;
+    }
+
+    private static MediaAsset mediaAsset(StorageProvider provider, String bucket, String storageKey) {
+        MediaAsset asset = new MediaAsset();
+        asset.setProvider(provider);
+        asset.setBucket(bucket);
+        asset.setStorageKey(storageKey);
+        return asset;
     }
 
     private static byte[] png(int width, int height) throws Exception {
