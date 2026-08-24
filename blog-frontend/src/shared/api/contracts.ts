@@ -53,6 +53,32 @@ export interface UpdateSiteProfileRequest {
   githubUrl: string
 }
 
+export type MediaPurpose = 'AVATAR' | 'ARTICLE_COVER' | 'TOPIC_COVER' | 'TOOL_COVER' | 'INLINE_IMAGE' | 'ATTACHMENT'
+export type MediaUploadMode = 'DIRECT' | 'PROXY'
+export type MediaStatus = 'PENDING_UPLOAD' | 'READY' | 'FAILED' | 'ABANDONED' | 'DELETED'
+
+export interface MediaUploadPlanResponse {
+  mediaId: number
+  uploadMode: MediaUploadMode
+  method: string
+  uploadUrl: string
+  headers: Record<string, string>
+  expiresAt: IsoDateTime
+}
+
+export interface MediaAssetResponse {
+  mediaId: number
+  filename: string
+  contentType: string
+  byteSize: number
+  width: number | null
+  height: number | null
+  status: MediaStatus
+  purpose: MediaPurpose
+  url: string
+}
+
+/** @deprecated Transitional compatibility for callers migrated in Task 9. */
 export interface MediaUploadResponse {
   id: number
   storageKey: string
