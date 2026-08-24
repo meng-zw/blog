@@ -56,6 +56,9 @@ public class MediaAsset {
     @Column(name = "uploaded_by_id")
     private Long uploadedById;
 
+    @Column(name = "operation_token", length = 36)
+    private String operationToken;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -91,6 +94,8 @@ public class MediaAsset {
     public void setEtag(String etag) { this.etag = etag; }
     public Long getUploadedById() { return uploadedById; }
     public void setUploadedById(Long uploadedById) { this.uploadedById = uploadedById; }
+    public String getOperationToken() { return operationToken; }
+    public void setOperationToken(String operationToken) { this.operationToken = operationToken; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getConfirmedAt() { return confirmedAt; }

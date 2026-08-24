@@ -52,7 +52,7 @@ public class GlobalExceptionHandler {
         HttpStatus status = exception.kind() == ObjectStorageException.Kind.NOT_FOUND
                 ? HttpStatus.NOT_FOUND : HttpStatus.SERVICE_UNAVAILABLE;
         return problem(status, status == HttpStatus.NOT_FOUND ? "Resource not found" : "Service unavailable",
-                exception.getMessage(), request, null);
+                status == HttpStatus.NOT_FOUND ? "媒体文件不存在" : "媒体存储暂时不可用，请稍后重试", request, null);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

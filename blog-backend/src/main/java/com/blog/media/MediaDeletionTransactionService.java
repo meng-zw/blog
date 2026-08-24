@@ -66,9 +66,11 @@ public class MediaDeletionTransactionService {
     public Optional<DeletionTarget> claimCleanup(long mediaId, Instant expiredBefore) {
         MediaAsset asset = mediaRepository.lockById(mediaId).orElse(null);
         if (asset == null || asset.getStatus() == MediaStatus.DELETED) return Optional.empty();
-        if (asset.getStatus() == MediaStatus.PENDING_UPLOAD) {
-            if (asset.getCreatedAt() == null || !asset.getCreatedAt().isBefore(expiredBefore)) return Optional.empty();
+        if (asset.getStatus() == MediaStatus.PENDING_UPLOAD || asset.getStatus() == MediaStatus.UPLOADING
+                || asset.getStatus() == MediaStatus.VERIFYING) {
+            if (asset.getUpdatedAt() == null || !asset.getUpdatedAt().isBefore(expiredBefore)) return Optional.empty();
             asset.setStatus(MediaStatus.ABANDONED);
+            asset.setOperationToken(null);
         }
         if (asset.getStatus() != MediaStatus.ABANDONED && asset.getStatus() != MediaStatus.FAILED
                 && asset.getStatus() != MediaStatus.DELETING) {

@@ -25,9 +25,9 @@ public interface MediaAssetRepository extends JpaRepository<MediaAsset, Long> {
     Optional<MediaAsset> lockById(Long id);
 
     @Query("select media.id from MediaAsset media where " +
-            "(media.status = :pendingStatus and media.createdAt < :expiredBefore) " +
+            "(media.status in :expiringStatuses and media.updatedAt < :expiredBefore) " +
             "or media.status in :retryStatuses order by media.updatedAt, media.id")
-    List<Long> findCleanupCandidateIds(@Param("pendingStatus") MediaStatus pendingStatus,
+    List<Long> findCleanupCandidateIds(@Param("expiringStatuses") List<MediaStatus> expiringStatuses,
                                        @Param("expiredBefore") Instant expiredBefore,
                                        @Param("retryStatuses") List<MediaStatus> retryStatuses,
                                        Pageable pageable);

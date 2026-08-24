@@ -6,6 +6,10 @@ import com.blog.media.storage.ObjectStorageRegistry;
 import com.blog.shared.error.ServiceUnavailableException;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Pageable;
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.time.Clock;
@@ -16,6 +20,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -81,6 +86,44 @@ class MediaDeletionServiceTest {
         verify(fixture.transactions).finalizeDeleted(43L);
         verify(fixture.mediaRepository).findCleanupCandidateIds(any(), any(), any(),
                 org.mockito.ArgumentMatchers.argThat(page -> page.getPageSize() == 100));
+    }
+
+    @Test
+    void cleanupLogsStructuredFailureWithoutSilentlySwallowingIt() throws Exception {
+        Fixture fixture = fixture();
+        when(fixture.mediaRepository.findCleanupCandidateIds(any(), any(), any(), any(Pageable.class))).thenReturn(List.of(42L));
+        when(fixture.transactions.claimCleanup(eq(42L), any())).thenReturn(java.util.Optional.of(target(42L)));
+        org.mockito.Mockito.doThrow(new IOException("offline with secret-key-name"))
+                .when(fixture.storage).delete(target(42L).location());
+        Logger logger = (Logger) LoggerFactory.getLogger(MediaDeletionService.class);
+        ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> events = new ListAppender<>();
+        events.start(); logger.addAppender(events);
+        try {
+            fixture.service.cleanupBatch();
+        } finally {
+            logger.detachAppender(events);
+        }
+
+        assertThat(events.list).anySatisfy(event -> {
+            assertThat(event.getLevel()).isEqualTo(Level.WARN);
+            assertThat(event.getFormattedMessage()).contains("mediaId=42", "provider=LOCAL", "category=IO");
+        });
+    }
+
+    @Test
+    void laterCleanupRecoversWhenDatabaseFinalizationFailedAfterObjectDeletion() throws Exception {
+        Fixture fixture = fixture();
+        var target = target(42L);
+        when(fixture.transactions.claimCleanup(eq(42L), any()))
+                .thenReturn(java.util.Optional.of(target));
+        org.mockito.Mockito.doThrow(new org.springframework.dao.TransientDataAccessResourceException("database offline"))
+                .doNothing().when(fixture.transactions).finalizeDeleted(42L);
+
+        assertThat(fixture.service.cleanupOne(42L)).isFalse();
+        assertThat(fixture.service.cleanupOne(42L)).isTrue();
+
+        verify(fixture.storage, org.mockito.Mockito.times(2)).delete(target.location());
+        verify(fixture.transactions, org.mockito.Mockito.times(2)).finalizeDeleted(42L);
     }
 
     private Fixture fixture() {

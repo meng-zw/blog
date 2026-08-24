@@ -65,7 +65,18 @@ class GlobalExceptionHandlerTest {
     void returnsNotFoundForMissingProviderObjectsOutsideCompletionWorkflow() throws Exception {
         mockMvc.perform(get("/test/missing-object"))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.detail").value("Media object not found"));
+                .andExpect(jsonPath("$.detail").value("媒体文件不存在"))
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("private/object-key"))));
+    }
+
+    @Test
+    void returnsSanitizedServiceUnavailableForTransientProviderFailures() throws Exception {
+        mockMvc.perform(get("/test/storage-transient"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.detail").value("媒体存储暂时不可用，请稍后重试"))
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("private/object-key"))));
     }
 
     @RestController
@@ -83,7 +94,14 @@ class GlobalExceptionHandlerTest {
 
         @GetMapping("/test/missing-object")
         void missingObject() {
-            throw com.blog.media.storage.ObjectStorageException.notFound("Media object not found", null);
+            throw com.blog.media.storage.ObjectStorageException.notFound(
+                    "Media object not found: private/object-key.png", null);
+        }
+
+        @GetMapping("/test/storage-transient")
+        void transientStorageFailure() {
+            throw com.blog.media.storage.ObjectStorageException.transientFailure(
+                    "Unable to access R2 object: private/object-key.png", null);
         }
 
         @PostMapping("/test/validate")

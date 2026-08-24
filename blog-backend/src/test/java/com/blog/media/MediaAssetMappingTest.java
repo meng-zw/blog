@@ -18,7 +18,8 @@ class MediaAssetMappingTest {
     void mapsProviderStatusAndPurposeAsStringEnumsWithLifecycleMetadata() throws Exception {
         assertThat(MediaAsset.class.getDeclaredFields())
                 .extracting(Field::getName)
-                .contains("provider", "bucket", "status", "purpose", "etag", "confirmedAt", "updatedAt");
+                .contains("provider", "bucket", "status", "purpose", "etag", "confirmedAt", "updatedAt",
+                        "operationToken");
 
         assertStringEnum("provider", "com.blog.media.StorageProvider");
         assertStringEnum("status", "com.blog.media.MediaStatus");
@@ -28,6 +29,7 @@ class MediaAssetMappingTest {
         assertThat(field("etag").getType()).isEqualTo(String.class);
         assertThat(field("confirmedAt").getType()).isEqualTo(Instant.class);
         assertThat(field("updatedAt").getType()).isEqualTo(Instant.class);
+        assertThat(field("operationToken").getType()).isEqualTo(String.class);
     }
 
     @Test

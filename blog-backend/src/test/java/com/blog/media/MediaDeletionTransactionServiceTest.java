@@ -87,6 +87,34 @@ class MediaDeletionTransactionServiceTest {
         verify(fixture.mediaRepository).saveAndFlush(deleting);
     }
 
+    @Test
+    void cleanupCannotClaimAnActiveVerificationLease() {
+        Fixture fixture = fixture();
+        MediaAsset verifying = ready(42L, 7L);
+        verifying.setStatus(MediaStatus.VERIFYING);
+        verifying.setOperationToken("token");
+        verifying.setUpdatedAt(NOW);
+        when(fixture.mediaRepository.lockById(42L)).thenReturn(Optional.of(verifying));
+
+        assertThat(fixture.service.claimCleanup(42L, NOW.minusSeconds(86400))).isEmpty();
+        assertThat(verifying.getStatus()).isEqualTo(MediaStatus.VERIFYING);
+    }
+
+    @Test
+    void cleanupRecoversAnExpiredVerificationClaimWithoutLeavingItsToken() {
+        Fixture fixture = fixture();
+        MediaAsset verifying = ready(42L, 7L);
+        verifying.setStatus(MediaStatus.VERIFYING);
+        verifying.setOperationToken("crashed-worker");
+        verifying.setUpdatedAt(NOW.minusSeconds(86401));
+        when(fixture.mediaRepository.lockById(42L)).thenReturn(Optional.of(verifying));
+
+        assertThat(fixture.service.claimCleanup(42L, NOW.minusSeconds(86400))).isPresent();
+
+        assertThat(verifying.getStatus()).isEqualTo(MediaStatus.ABANDONED);
+        assertThat(verifying.getOperationToken()).isNull();
+    }
+
     private Fixture fixture() {
         MediaAssetRepository mediaRepository = mock(MediaAssetRepository.class);
         AdminAccountRepository adminRepository = mock(AdminAccountRepository.class);

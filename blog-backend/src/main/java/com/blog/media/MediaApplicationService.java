@@ -44,22 +44,25 @@ public class MediaApplicationService {
     private final MediaProperties properties;
     private final MediaDeletionService deletionService;
     private final MediaDeletionTransactionService deletionTransactions;
+    private final MediaOperationTransactionService operationTransactions;
     private final Clock clock;
 
     public MediaApplicationService(MediaAssetRepository mediaRepository, AdminAccountRepository adminAccountRepository,
                                    ObjectStorageRegistry storageRegistry, MediaContentValidator contentValidator,
                                    MediaReferenceChecker referenceChecker, MediaProperties properties,
                                    MediaDeletionService deletionService,
-                                   MediaDeletionTransactionService deletionTransactions) {
+                                   MediaDeletionTransactionService deletionTransactions,
+                                   MediaOperationTransactionService operationTransactions) {
         this(mediaRepository, adminAccountRepository, storageRegistry, contentValidator, referenceChecker, properties,
-                deletionService, deletionTransactions, Clock.systemUTC());
+                deletionService, deletionTransactions, operationTransactions, Clock.systemUTC());
     }
 
     MediaApplicationService(MediaAssetRepository mediaRepository, AdminAccountRepository adminAccountRepository,
                             ObjectStorageRegistry storageRegistry, MediaContentValidator contentValidator,
                             MediaReferenceChecker referenceChecker, MediaProperties properties,
                             MediaDeletionService deletionService,
-                            MediaDeletionTransactionService deletionTransactions, Clock clock) {
+                            MediaDeletionTransactionService deletionTransactions,
+                            MediaOperationTransactionService operationTransactions, Clock clock) {
         this.mediaRepository = mediaRepository;
         this.adminAccountRepository = adminAccountRepository;
         this.storageRegistry = storageRegistry;
@@ -68,6 +71,7 @@ public class MediaApplicationService {
         this.properties = properties;
         this.deletionService = deletionService;
         this.deletionTransactions = deletionTransactions;
+        this.operationTransactions = operationTransactions;
         this.clock = clock;
     }
 
@@ -101,61 +105,61 @@ public class MediaApplicationService {
                 ticket.requiredHeaders(), ticket.expiresAt());
     }
 
-    @Transactional
     public void uploadProxyContent(long mediaId, String username, InputStream content) {
-        MediaAsset asset = ownedAsset(mediaId, username);
-        if (asset.getStatus() != MediaStatus.PENDING_UPLOAD) {
-            throw new ConflictException("Media asset is not waiting for upload");
-        }
-        ObjectStorage storage = storage(asset);
-        if (storage.capabilities().directUpload()) {
-            throw new ConflictException("This media asset requires a direct upload");
-        }
+        var claim = operationTransactions.claimProxyUpload(mediaId, username);
         try {
-            InputStream limitedContent = contentValidator.limitProxyUpload(asset.getPurpose(), asset.getContentType(), content);
-            storage.upload(location(asset), new ObjectUploadRequest(asset.getStorageKey(), asset.getContentType(), asset.getByteSize()), limitedContent);
+            ObjectStorage storage = storageRegistry.get(claim.location().provider());
+            if (storage.capabilities().directUpload()) {
+                throw new ConflictException("This media asset requires a direct upload");
+            }
+            InputStream limitedContent = contentValidator.limitProxyUpload(
+                    claim.purpose(), claim.contentType(), content);
+            storage.upload(claim.location(), new ObjectUploadRequest(claim.location().objectKey(),
+                    claim.contentType(), claim.byteSize()), limitedContent);
+            operationTransactions.finishProxyUpload(claim);
+        } catch (IllegalArgumentException | ConflictException exception) {
+            safelyReleaseProxyClaim(claim, exception);
+            throw exception;
         } catch (IOException exception) {
-            throw new IllegalArgumentException("Unable to store uploaded media", exception);
+            safelyReleaseProxyClaim(claim, exception);
+            throw new ServiceUnavailableException("媒体存储暂时不可用，请稍后重试", exception);
+        } catch (RuntimeException exception) {
+            safelyReleaseProxyClaim(claim, exception);
+            throw new ServiceUnavailableException("媒体存储暂时不可用，请稍后重试", exception);
         }
     }
 
-    @Transactional(noRollbackFor = IllegalArgumentException.class)
     public MediaResponse complete(long mediaId, String username) {
-        MediaAsset asset = ownedAsset(mediaId, username);
-        if (asset.getStatus() == MediaStatus.READY) {
-            return response(asset);
-        }
-        if (asset.getStatus() != MediaStatus.PENDING_UPLOAD) {
-            throw new ConflictException("Media asset cannot be completed from status " + asset.getStatus());
-        }
-        ObjectStorage storage = storage(asset);
+        var claim = operationTransactions.claimVerification(mediaId, username);
+        if (claim.status() == MediaStatus.READY) return response(claim);
+        ObjectStorage storage;
         try {
-            StoredObject stored = storage.inspect(location(asset));
-            verifyStoredObject(asset, stored);
-            MediaContentValidator.ValidatedContent content;
-            try (InputStream stream = storage.openStream(location(asset))) {
-                content = contentValidator.validateStoredContent(asset.getPurpose(), asset.getContentType(), stream);
+            storage = storageRegistry.get(claim.location().provider());
+        } catch (RuntimeException exception) {
+            safelyReleaseVerificationClaim(claim, exception);
+            throw new ServiceUnavailableException("媒体存储暂时不可用，请稍后重试", exception);
+        }
+        StoredObject stored;
+        MediaContentValidator.ValidatedContent content;
+        try {
+            stored = storage.inspect(claim.location());
+            verifyStoredObject(claim, stored);
+            try (InputStream stream = storage.openStream(claim.location())) {
+                content = contentValidator.validateStoredContent(claim.purpose(), claim.contentType(), stream);
             }
-            Instant now = clock.instant();
-            asset.setContentType(normalizeContentType(stored.contentType()));
-            asset.setByteSize(stored.byteSize());
-            asset.setEtag(stored.etag());
-            asset.setWidth(content.width());
-            asset.setHeight(content.height());
-            asset.setStatus(MediaStatus.READY);
-            asset.setConfirmedAt(now);
-            asset.setUpdatedAt(now);
-            mediaRepository.save(asset);
-            return response(asset);
         } catch (ObjectStorageException | IOException exception) {
+            safelyReleaseVerificationClaim(claim, exception);
             throw new ServiceUnavailableException("媒体存储暂时不可用，请稍后重试", exception);
         } catch (IllegalArgumentException exception) {
-            failUpload(asset, storage);
+            // Persist a terminal cleanup candidate before any destructive provider call.
+            operationTransactions.failVerification(claim);
+            deletionService.cleanupOne(mediaId);
             throw new IllegalArgumentException("Unable to verify stored media", exception);
         } catch (RuntimeException exception) {
-            // Unknown provider failures are safer to retry than to destroy an otherwise valid upload.
+            safelyReleaseVerificationClaim(claim, exception);
             throw new ServiceUnavailableException("媒体存储暂时不可用，请稍后重试", exception);
         }
+        return response(operationTransactions.completeVerification(claim, stored, content));
     }
 
     public void delete(long mediaId, String username) {
@@ -214,36 +218,33 @@ public class MediaApplicationService {
         return ticket;
     }
 
-    private void verifyStoredObject(MediaAsset asset, StoredObject object) {
-        if (!asset.getStorageKey().equals(object.key())) {
+    private void verifyStoredObject(MediaOperationTransactionService.OperationClaim claim, StoredObject object) {
+        if (!claim.location().objectKey().equals(object.key())) {
             throw new IllegalArgumentException("Stored object key does not match media asset");
         }
-        if (object.byteSize() != asset.getByteSize()) {
+        if (object.byteSize() != claim.byteSize()) {
             throw new IllegalArgumentException("Uploaded object size does not match declared size");
         }
-        if (!normalizeContentType(object.contentType()).equals(asset.getContentType())) {
+        if (!normalizeContentType(object.contentType()).equals(claim.contentType())) {
             throw new IllegalArgumentException("Uploaded object content type does not match declared type");
         }
     }
 
-    private void failUpload(MediaAsset asset, ObjectStorage storage) {
-        boolean deleted;
+    private void safelyReleaseVerificationClaim(MediaOperationTransactionService.OperationClaim claim,
+                                                Exception original) {
         try {
-            storage.delete(location(asset));
-            deleted = true;
-        } catch (IOException | RuntimeException ignored) {
-            deleted = false;
+            operationTransactions.releaseVerification(claim);
+        } catch (RuntimeException releaseFailure) {
+            original.addSuppressed(releaseFailure);
         }
-        // FAILED remains retryable only when provider cleanup did not complete.
-        asset.setStatus(deleted ? MediaStatus.DELETED : MediaStatus.FAILED);
-        asset.setUpdatedAt(clock.instant());
-        mediaRepository.save(asset);
     }
 
-    private MediaAsset ownedAsset(long mediaId, String username) {
-        AdminAccount administrator = currentAdministrator(username);
-        return mediaRepository.findByIdAndUploadedById(mediaId, administrator.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Media asset", Long.toString(mediaId)));
+    private void safelyReleaseProxyClaim(MediaOperationTransactionService.OperationClaim claim, Exception original) {
+        try {
+            operationTransactions.releaseProxyUpload(claim);
+        } catch (RuntimeException releaseFailure) {
+            original.addSuppressed(releaseFailure);
+        }
     }
 
     private MediaAsset readyPublicAsset(long mediaId) {
@@ -274,6 +275,12 @@ public class MediaApplicationService {
     private static MediaResponse response(MediaAsset asset) {
         return new MediaResponse(asset.getId(), asset.getOriginalFilename(), asset.getContentType(), asset.getByteSize(),
                 asset.getWidth(), asset.getHeight(), asset.getStatus(), asset.getPurpose(), stableUrl(asset));
+    }
+
+    private static MediaResponse response(MediaOperationTransactionService.OperationClaim claim) {
+        return new MediaResponse(claim.mediaId(), claim.filename(), claim.contentType(), claim.byteSize(),
+                claim.width(), claim.height(), claim.status(), claim.purpose(),
+                "/api/media/assets/" + claim.mediaId());
     }
 
     /** Provider-neutral URL used by every business response and persisted Markdown reference. */
