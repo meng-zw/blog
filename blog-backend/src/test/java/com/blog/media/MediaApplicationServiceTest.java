@@ -365,6 +365,40 @@ class MediaApplicationServiceTest {
     }
 
     @Test
+    void mapsGenericProviderDownloadIoToRetryableServiceUnavailable() throws Exception {
+        Fixture fixture = fixture(StorageProvider.R2, true);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        asset.setProvider(StorageProvider.R2);
+        asset.setBucket("blog-media");
+        asset.setPurpose(MediaPurpose.ATTACHMENT);
+        when(fixture.readTransactions.readySnapshot(42L)).thenReturn(
+                new MediaReadTransactionService.ReadyMediaSnapshot(42L, location(asset), "application/pdf",
+                        "private.pdf", 9L, MediaPurpose.ATTACHMENT));
+        when(fixture.storage.openStream(location(asset)))
+                .thenThrow(new IOException("/secret/root/private-object.pdf unavailable"));
+
+        assertThatThrownBy(() -> fixture.service.openPublicDownload(42L))
+                .isInstanceOf(ServiceUnavailableException.class)
+                .hasMessage("媒体存储暂时不可用，请稍后重试");
+    }
+
+    @Test
+    void mapsMissingPersistedProviderAdapterToRetryableServiceUnavailable() {
+        Fixture fixture = fixture(StorageProvider.LOCAL, false);
+        var missingLocation = new com.blog.media.storage.ObjectLocation(
+                StorageProvider.R2, "archive", "attachments/123e4567-e89b-12d3-a456-426614174000.pdf");
+        when(fixture.readTransactions.readySnapshot(42L)).thenReturn(
+                new MediaReadTransactionService.ReadyMediaSnapshot(42L, missingLocation, "application/pdf",
+                        "private.pdf", 9L, MediaPurpose.ATTACHMENT));
+        when(fixture.storageRegistry.get(StorageProvider.R2))
+                .thenThrow(new IllegalArgumentException("No adapter for private archive"));
+
+        assertThatThrownBy(() -> fixture.service.openPublicDownload(42L))
+                .isInstanceOf(ServiceUnavailableException.class)
+                .hasMessage("媒体存储暂时不可用，请稍后重试");
+    }
+
+    @Test
     void marksExpiredPendingUploadTerminalAfterRemovingItsObject() throws Exception {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
         when(fixture.deletionService.cleanupBatch()).thenReturn(1);
@@ -465,7 +499,7 @@ class MediaApplicationServiceTest {
         MediaApplicationService service = new MediaApplicationService(mediaRepository, adminRepository, registry,
                 new MediaContentValidator(properties), referenceChecker, properties, deletionService,
                 deletionTransactions, operationTransactions, readTransactions, Clock.fixed(NOW, ZoneOffset.UTC));
-        return new Fixture(service, mediaRepository, storage, referenceChecker, saved, deletionTransactions,
+        return new Fixture(service, mediaRepository, registry, storage, referenceChecker, saved, deletionTransactions,
                 deletionService, operationTransactions, readTransactions);
     }
 
@@ -537,7 +571,8 @@ class MediaApplicationServiceTest {
         }
     }
 
-    private record Fixture(MediaApplicationService service, MediaAssetRepository mediaRepository, ObjectStorage storage,
+    private record Fixture(MediaApplicationService service, MediaAssetRepository mediaRepository,
+                           ObjectStorageRegistry storageRegistry, ObjectStorage storage,
                            MediaReferenceChecker referenceChecker, MediaAsset saved,
                            MediaDeletionTransactionService deletionTransactions, MediaDeletionService deletionService,
                            MediaOperationTransactionService operationTransactions,

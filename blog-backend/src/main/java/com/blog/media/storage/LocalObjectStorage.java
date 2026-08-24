@@ -104,7 +104,16 @@ public class LocalObjectStorage implements ObjectStorage {
     @Override
     public InputStream openStream(ObjectLocation location) throws IOException {
         String objectKey = localKey(location);
-        return Files.newInputStream(existingObjectPath(objectKey));
+        try {
+            return Files.newInputStream(existingObjectPath(objectKey));
+        } catch (ObjectStorageException exception) {
+            throw exception;
+        } catch (java.nio.file.NoSuchFileException exception) {
+            // Covers a delete race between the regular-file check and opening the stream.
+            throw ObjectStorageException.notFound("Media object not found", exception);
+        } catch (IOException exception) {
+            throw ObjectStorageException.transientFailure("Unable to open local media object", exception);
+        }
     }
 
     @Override

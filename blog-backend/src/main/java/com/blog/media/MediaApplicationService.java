@@ -213,8 +213,12 @@ public class MediaApplicationService {
         try {
             return new PublicMediaContent(storageRegistry.get(snapshot.location().provider())
                     .openStream(snapshot.location()), snapshot.contentType(), snapshot.filename(), snapshot.byteSize());
+        } catch (ObjectStorageException exception) {
+            throw exception;
         } catch (IOException exception) {
-            throw new IllegalArgumentException("Unable to open media object", exception);
+            throw new ServiceUnavailableException("媒体存储暂时不可用，请稍后重试", exception);
+        } catch (RuntimeException exception) {
+            throw new ServiceUnavailableException("媒体存储暂时不可用，请稍后重试", exception);
         }
     }
 

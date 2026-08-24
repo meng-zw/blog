@@ -62,4 +62,32 @@ class PublicMediaControllerTest {
                 .andExpect(header().doesNotExist("Location"))
                 .andExpect(content().bytes("pdf-bytes".getBytes()));
     }
+
+    @Test
+    void missingLocalAttachmentReturnsSanitizedNotFound() throws Exception {
+        when(mediaApplicationService.openPublicDownload(42L)).thenThrow(
+                com.blog.media.storage.ObjectStorageException.notFound(
+                        "Media object not found: attachments/private-object.pdf", null));
+
+        mockMvc.perform(get("/api/media/assets/42/download").contextPath("/api"))
+                .andExpect(status().isNotFound())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.detail")
+                        .value("媒体文件不存在"))
+                .andExpect(content().string(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("private-object"))));
+    }
+
+    @Test
+    void providerDownloadIoReturnsSanitizedServiceUnavailable() throws Exception {
+        when(mediaApplicationService.openPublicDownload(42L)).thenThrow(
+                new com.blog.shared.error.ServiceUnavailableException(
+                        "媒体存储暂时不可用，请稍后重试", new java.io.IOException("/secret/provider/path")));
+
+        mockMvc.perform(get("/api/media/assets/42/download").contextPath("/api"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.detail")
+                        .value("媒体存储暂时不可用，请稍后重试"))
+                .andExpect(content().string(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("secret/provider"))));
+    }
 }

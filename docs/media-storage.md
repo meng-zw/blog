@@ -90,6 +90,8 @@ Compose 的 Nginx 入口将 `client_max_body_size` 设为 64 MiB，为后端 51 
 3. 浏览器调用 `POST /api/admin/media/{id}/complete`。服务先用短数据库事务将媒体从 `PENDING_UPLOAD` 原子认领为 `VERIFYING`，再在事务外验证对象，最后用第二个短事务将媒体置为 `READY`。重复 complete 是幂等的。
 4. Vditor 插入 `![名称](/api/media/assets/{id})`。公开读该地址会 302 到该媒体当前 provider 的公开地址；公开附件下载使用 `/api/media/assets/{id}/download`，并强制下载响应。附件下载只在短只读事务中复制 READY 媒体的位置与安全响应元数据，随后结束事务，再打开 provider 流并由 HTTP 流式响应负责关闭，避免慢下载占用数据库事务和连接。
 
+公开附件读取统一使用 provider-neutral 错误语义：Local/R2 已确认对象不存在返回 HTTP 404；适配器缺失、配置不可用、普通文件/网络 I/O 故障返回可重试 HTTP 503。公开 Problem Details 只包含通用文案，不暴露对象 key、桶名或本地文件系统路径；具体异常仅进入受控服务端日志。
+
 上传计划默认按“管理员账号 + 客户端 IP”每分钟最多 30 次，并最多跟踪 10000 个 key。该限流器是有界的单节点内存实现；单实例部署可直接使用。若横向扩展 API，发布前必须替换为 Redis 等共享限流实现，不能把每个节点各自的额度当成集群额度。
 
 未完成、失败、删除中或已删除媒体不会通过稳定公开地址读出。管理员只能开始删除没有文章、头像、封面、专题或工具引用的 READY 媒体，并可重试自己处于 `DELETING` 的媒体；文章删除只移除引用，不自动删除可能复用的对象。

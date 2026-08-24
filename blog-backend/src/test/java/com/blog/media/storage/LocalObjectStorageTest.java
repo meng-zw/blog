@@ -103,6 +103,17 @@ class LocalObjectStorageTest {
     }
 
     @Test
+    void reportsAbsentObjectsAsNotFoundWhenOpeningPublicContent() {
+        LocalObjectStorage storage = storage();
+        String key = "attachments/" + UUID.randomUUID() + ".pdf";
+
+        assertThatThrownBy(() -> storage.openStream(location(key)))
+                .isInstanceOf(ObjectStorageException.class)
+                .satisfies(error -> assertThat(((ObjectStorageException) error).kind())
+                        .isEqualTo(ObjectStorageException.Kind.NOT_FOUND));
+    }
+
+    @Test
     void rejectsMismatchedRequestSize() {
         LocalObjectStorage storage = storage();
         String key = "tool-covers/" + UUID.randomUUID() + ".png";
