@@ -115,7 +115,7 @@ class MediaApplicationServiceTest {
 
         assertThatIllegalArgumentException().isThrownBy(() -> fixture.service.complete(42L, "owner"));
 
-        assertThat(asset.getStatus()).isEqualTo(MediaStatus.FAILED);
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.DELETED);
         verify(fixture.storage).delete(location(asset));
     }
 
@@ -129,8 +129,21 @@ class MediaApplicationServiceTest {
 
         assertThatIllegalArgumentException().isThrownBy(() -> fixture.service.complete(42L, "owner"));
 
-        assertThat(asset.getStatus()).isEqualTo(MediaStatus.FAILED);
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.DELETED);
         verify(fixture.mediaRepository).save(asset);
+    }
+
+    @Test
+    void retainsFailedStateWhenValidationCleanupCannotDeleteTheObject() throws Exception {
+        Fixture fixture = fixture(StorageProvider.LOCAL, false);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        when(fixture.mediaRepository.findByIdAndUploadedById(42L, 7L)).thenReturn(Optional.of(asset));
+        when(fixture.storage.inspect(location(asset))).thenThrow(new IllegalArgumentException("invalid object"));
+        org.mockito.Mockito.doThrow(new IOException("offline")).when(fixture.storage).delete(location(asset));
+
+        assertThatIllegalArgumentException().isThrownBy(() -> fixture.service.complete(42L, "owner"));
+
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.FAILED);
     }
 
     @Test

@@ -249,12 +249,15 @@ public class MediaApplicationService {
     }
 
     private void failUpload(MediaAsset asset, ObjectStorage storage) {
+        boolean deleted;
         try {
             storage.delete(location(asset));
+            deleted = true;
         } catch (IOException | RuntimeException ignored) {
-            // A scheduled cleanup can retry storage cleanup, but clients must never observe a false READY state.
+            deleted = false;
         }
-        asset.setStatus(MediaStatus.FAILED);
+        // FAILED remains retryable only when provider cleanup did not complete.
+        asset.setStatus(deleted ? MediaStatus.DELETED : MediaStatus.FAILED);
         asset.setUpdatedAt(clock.instant());
         mediaRepository.save(asset);
     }
