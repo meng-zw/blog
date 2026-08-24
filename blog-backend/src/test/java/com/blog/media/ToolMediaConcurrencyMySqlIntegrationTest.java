@@ -21,6 +21,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -40,6 +41,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest(classes = ToolMediaConcurrencyMySqlIntegrationTest.JpaConfig.class,
         properties = "spring.jpa.hibernate.ddl-auto=validate")
@@ -64,6 +66,7 @@ class ToolMediaConcurrencyMySqlIntegrationTest {
     @Autowired ToolMediaReferenceService referenceService;
     @Autowired MediaDeletionTransactionService deletionTransactions;
     @Autowired PlatformTransactionManager transactionManager;
+    @Autowired JdbcTemplate jdbc;
 
     private ExecutorService executor;
 
@@ -139,6 +142,37 @@ class ToolMediaConcurrencyMySqlIntegrationTest {
 
         assertThat(toolMediaRepository.findByTool_Id(tool.getId())).extracting(reference -> reference.getMedia().getId())
                 .containsExactly(retained.getId());
+    }
+
+    @Test
+    void triggerFailureAfterObsoleteDeletionRollsBackToTheCommittedReference() {
+        AdminAccount administrator = administrator();
+        Tool tool = toolRepository.saveAndFlush(tool());
+        MediaAsset oldMedia = mediaAssetRepository.saveAndFlush(inlineImage(administrator.getId(), "old.png"));
+        MediaAsset newMedia = mediaAssetRepository.saveAndFlush(inlineImage(administrator.getId(), "new.png"));
+        referenceService.synchronize(tool, "![old](/api/media/assets/" + oldMedia.getId() + ")");
+        jdbc.execute("DROP TRIGGER IF EXISTS tool_media_reject_new_reference");
+        jdbc.execute("""
+                CREATE TRIGGER tool_media_reject_new_reference
+                BEFORE INSERT ON tool_media
+                FOR EACH ROW
+                BEGIN
+                    IF NEW.tool_id = %d AND NEW.media_id = %d THEN
+                        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'tool_media insert rejected for rollback test';
+                    END IF;
+                END
+                """.formatted(tool.getId(), newMedia.getId()));
+
+        try {
+            assertThatThrownBy(() -> referenceService.synchronize(tool,
+                    "![new](/api/media/assets/" + newMedia.getId() + ")"))
+                    .hasMessageContaining("tool_media insert rejected for rollback test");
+        } finally {
+            jdbc.execute("DROP TRIGGER IF EXISTS tool_media_reject_new_reference");
+        }
+
+        assertThat(toolMediaRepository.findByTool_Id(tool.getId())).extracting(reference -> reference.getMedia().getId())
+                .containsExactly(oldMedia.getId());
     }
 
     private AdminAccount administrator() {

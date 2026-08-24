@@ -152,6 +152,28 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
     }
 
     @Test
+    void backfillUsesMoreThanOnePageAndKeepsPreexistingToolMediaRowsIdempotently() {
+        assertThat(Flyway.configure().dataSource(dataSource).target("14").load().migrate().success).isTrue();
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        Long mediaId = insertMedia(jdbc, "backfill-paged.png", "READY", "INLINE_IMAGE");
+        List<Long> toolIds = java.util.stream.IntStream.range(0, 11)
+                .mapToObj(index -> insertTool(jdbc, "backfill-page-" + index, "DRAFT",
+                        "![image](/api/media/assets/" + mediaId + ")"))
+                .toList();
+        jdbc.update("INSERT INTO tool_media (tool_id, media_id, sort_order) VALUES (?, ?, ?)", toolIds.getFirst(),
+                mediaId, 37);
+
+        assertThat(Flyway.configure().dataSource(dataSource).load().migrate().success).isTrue();
+
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tool_media WHERE media_id = ?", Integer.class, mediaId))
+                .isEqualTo(11);
+        assertThat(jdbc.queryForObject("SELECT sort_order FROM tool_media WHERE tool_id = ? AND media_id = ?",
+                Integer.class, toolIds.getFirst(), mediaId)).isEqualTo(37);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tool_media WHERE media_id = ? AND sort_order = 0",
+                Integer.class, mediaId)).isEqualTo(10);
+    }
+
+    @Test
     void migratesVersionEightMediaRowsToTheLocalReadyInlineImageDefaults() {
         var versionEight = Flyway.configure().dataSource(dataSource).target("8").load();
         assertThat(versionEight.migrate().success).isTrue();
