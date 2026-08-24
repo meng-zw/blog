@@ -135,7 +135,7 @@ public class V14_1__backfill_tool_media_references extends BaseJavaMigration {
     private record ToolMarkdown(long id, String markdown) {
     }
 
-    private static final class Counters {
+    static final class Counters {
         private int inserted;
         private int missing;
         private int notReady;
@@ -151,17 +151,17 @@ public class V14_1__backfill_tool_media_references extends BaseJavaMigration {
         }
     }
 
-    private static final class InsertBatch {
+    static final class InsertBatch {
         private final PreparedStatement statement;
         private final Counters counters;
         private int size;
 
-        private InsertBatch(PreparedStatement statement, Counters counters) {
+        InsertBatch(PreparedStatement statement, Counters counters) {
             this.statement = statement;
             this.counters = counters;
         }
 
-        private void add(long toolId, long mediaId, int sortOrder) throws SQLException {
+        void add(long toolId, long mediaId, int sortOrder) throws SQLException {
             statement.setLong(1, toolId);
             statement.setLong(2, mediaId);
             statement.setInt(3, sortOrder);
@@ -172,7 +172,7 @@ public class V14_1__backfill_tool_media_references extends BaseJavaMigration {
             }
         }
 
-        private void flush() throws SQLException {
+        void flush() throws SQLException {
             if (size == 0) {
                 return;
             }
