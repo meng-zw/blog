@@ -10,20 +10,22 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class FlywayMigrationTest extends MySqlIntegrationTest {
     @Autowired DataSource dataSource;
 
     @Test
-    void migratesAnEmptyDatabaseToVersionFourteen() {
+    void migratesAnEmptyDatabaseToVersionFourteenPointOne() {
         var flyway = Flyway.configure().dataSource(dataSource).load();
         assertThat(flyway.info().current()).isNull();
 
         var result = flyway.migrate();
         assertThat(result.success).isTrue();
-        assertThat(result.migrationsExecuted).isEqualTo(14);
-        assertThat(result.targetSchemaVersion).isEqualTo("14");
+        assertThat(result.migrationsExecuted).isEqualTo(15);
+        assertThat(result.targetSchemaVersion).isEqualTo("14.1");
     }
 
     @Test
@@ -107,6 +109,49 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
     }
 
     @Test
+    void backfillsPublishedAndArchivedToolMarkdownWithoutPromotingInvalidLegacyReferences() {
+        assertThat(Flyway.configure().dataSource(dataSource).target("14").load().migrate().success).isTrue();
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        Long first = insertMedia(jdbc, "backfill-first.png", "READY", "INLINE_IMAGE");
+        Long second = insertMedia(jdbc, "backfill-second.png", "READY", "INLINE_IMAGE");
+        Long pending = insertMedia(jdbc, "backfill-pending.png", "PENDING_UPLOAD", "INLINE_IMAGE");
+        Long attachment = insertMedia(jdbc, "backfill-attachment.pdf", "READY", "ATTACHMENT");
+        Long published = insertTool(jdbc, "backfill-published", "PUBLISHED", """
+                ![second](/api/media/assets/%d)
+                ![duplicate](/api/media/assets/%d)
+                ```md
+                ![fenced](/api/media/assets/%d)
+                ```
+                ![pending](/api/media/assets/%d)
+                ![attachment](/api/media/assets/%d)
+                ![missing](/api/media/assets/999999)
+                ![query](/api/media/assets/%d?legacy=1)
+                ![first](/api/media/assets/%d)
+                """.formatted(second, second, first, pending, attachment, first, first));
+        Long archived = insertTool(jdbc, "backfill-archived", "ARCHIVED",
+                "![first](/api/media/assets/" + first + ")");
+
+        var result = Flyway.configure().dataSource(dataSource).load().migrate();
+
+        assertThat(result.success).isTrue();
+        assertThat(result.targetSchemaVersion).isEqualTo("14.1");
+        List<ToolMediaRow> rows = jdbc.query("""
+                SELECT tool_id, media_id, sort_order
+                FROM tool_media
+                ORDER BY tool_id, sort_order
+                """, (resultSet, rowNum) -> new ToolMediaRow(resultSet.getLong("tool_id"),
+                resultSet.getLong("media_id"), resultSet.getInt("sort_order")));
+        assertThat(rows).containsExactly(
+                new ToolMediaRow(published, second, 0),
+                new ToolMediaRow(published, first, 1),
+                new ToolMediaRow(archived, first, 0));
+        assertThatThrownBy(() -> jdbc.update("DELETE FROM media_asset WHERE id = ?", first))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tool_media WHERE media_id IN (?, ?)", Integer.class,
+                pending, attachment)).isZero();
+    }
+
+    @Test
     void migratesVersionEightMediaRowsToTheLocalReadyInlineImageDefaults() {
         var versionEight = Flyway.configure().dataSource(dataSource).target("8").load();
         assertThat(versionEight.migrate().success).isTrue();
@@ -122,7 +167,7 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
         var result = Flyway.configure().dataSource(dataSource).load().migrate();
 
         assertThat(result.success).isTrue();
-        assertThat(result.migrationsExecuted).isEqualTo(5);
+        assertThat(result.migrationsExecuted).isEqualTo(7);
         var migrated = jdbc.queryForMap("""
                 SELECT provider, bucket, status, purpose
                 FROM media_asset
@@ -158,5 +203,29 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
     @BeforeEach
     void resetDatabase() {
         Flyway.configure().dataSource(dataSource).cleanDisabled(false).load().clean();
+    }
+
+    private static Long insertMedia(JdbcTemplate jdbc, String filename, String status, String purpose) {
+        jdbc.update("""
+                INSERT INTO media_asset
+                    (provider, bucket, storage_key, status, purpose, original_filename, content_type, byte_size,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
+                """, "LOCAL", "", "inline-images/" + filename, status, purpose, filename,
+                purpose.equals("ATTACHMENT") ? "application/pdf" : "image/png", 42L);
+        return jdbc.queryForObject("SELECT id FROM media_asset WHERE storage_key = ?", Long.class,
+                "inline-images/" + filename);
+    }
+
+    private static Long insertTool(JdbcTemplate jdbc, String slug, String status, String markdown) {
+        jdbc.update("""
+                INSERT INTO tool
+                    (slug, name, summary, description_markdown, official_url, status, featured, sort_order, published_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6))
+                """, slug, slug, "Summary", markdown, "https://example.com", status, false, 0);
+        return jdbc.queryForObject("SELECT id FROM tool WHERE slug = ?", Long.class, slug);
+    }
+
+    private record ToolMediaRow(long toolId, long mediaId, int sortOrder) {
     }
 }

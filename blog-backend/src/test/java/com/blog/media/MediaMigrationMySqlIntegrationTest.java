@@ -69,14 +69,14 @@ class MediaMigrationMySqlIntegrationTest {
     }
 
     @Test
-    void migratesAFreshMySqlDatabaseThroughToolMediaReferences() {
+    void migratesAFreshMySqlDatabaseThroughToolMediaBackfill() {
         assumeDockerAvailable();
         cleanDatabase();
 
         var result = flyway().migrate();
 
         assertThat(result.success).isTrue();
-        assertThat(result.targetSchemaVersion).isEqualTo("14");
+        assertThat(result.targetSchemaVersion).isEqualTo("14.1");
         assertLocationIdentityContract();
         assertLengthPrefixedIdentityAvoidsDelimiterCollisions();
     }

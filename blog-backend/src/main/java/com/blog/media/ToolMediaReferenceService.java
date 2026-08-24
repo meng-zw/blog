@@ -3,6 +3,7 @@ package com.blog.media;
 import com.blog.shared.error.ResourceNotFoundException;
 import com.blog.tool.Tool;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -34,6 +35,7 @@ public class ToolMediaReferenceService {
         this.clock = clock;
     }
 
+    @Transactional
     public void synchronize(Tool tool, String markdown) {
         if (tool == null || tool.getId() == null) {
             throw new IllegalArgumentException("Tool must be saved before media references are synchronized");
@@ -70,6 +72,7 @@ public class ToolMediaReferenceService {
         }
     }
 
+    @Transactional
     public void removeAll(Tool tool) {
         if (tool == null || tool.getId() == null) {
             throw new IllegalArgumentException("Tool must be saved before media references are removed");

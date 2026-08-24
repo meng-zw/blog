@@ -8,6 +8,4 @@ public interface ToolMediaRepository extends JpaRepository<ToolMedia, ToolMediaI
     List<ToolMedia> findByTool_Id(Long toolId);
 
     void deleteByTool_Id(Long toolId);
-
-    boolean existsById_MediaId(Long mediaId);
 }

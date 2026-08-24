@@ -23,6 +23,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
@@ -31,6 +32,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -62,6 +64,7 @@ class ToolMediaPersistenceMySqlIntegrationTest {
     @Autowired ToolMediaReferenceService referenceService;
     @Autowired ToolService toolService;
     @Autowired EntityManager entityManager;
+    @Autowired JdbcTemplate jdbc;
 
     @Test
     void retainsAnUnchangedImageRowThroughAToolUpdate() {
@@ -70,7 +73,10 @@ class ToolMediaPersistenceMySqlIntegrationTest {
         referenceService.synchronize(tool, "![image](/api/media/assets/" + image.getId() + ")");
         entityManager.flush();
         entityManager.clear();
-        Instant createdAt = toolMediaRepository.findByTool_Id(tool.getId()).getFirst().getCreatedAt();
+        Instant sentinelCreatedAt = Instant.parse("2001-02-03T04:05:06Z");
+        jdbc.update("UPDATE tool_media SET created_at = ? WHERE tool_id = ? AND media_id = ?", Timestamp.from(sentinelCreatedAt),
+                tool.getId(), image.getId());
+        entityManager.clear();
 
         toolService.update(tool.getId(), new ToolWriteRequest("Updated tool", null, "Updated summary",
                 "![image](/api/media/assets/" + image.getId() + ")", "https://example.com", null, null,
@@ -81,7 +87,7 @@ class ToolMediaPersistenceMySqlIntegrationTest {
         List<ToolMedia> references = toolMediaRepository.findByTool_Id(tool.getId());
         assertThat(references).hasSize(1);
         assertThat(references.getFirst().getMedia().getId()).isEqualTo(image.getId());
-        assertThat(references.getFirst().getCreatedAt()).isEqualTo(createdAt);
+        assertThat(references.getFirst().getCreatedAt()).isEqualTo(sentinelCreatedAt);
     }
 
     private static Tool tool() {

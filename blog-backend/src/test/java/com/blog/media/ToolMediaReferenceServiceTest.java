@@ -72,16 +72,21 @@ class ToolMediaReferenceServiceTest {
     }
 
     @Test
-    void rejectsNonReadyOrPurposeIncompatibleImagesBeforeChangingExistingRows() {
+    void failedValidationLeavesExistingRowsUntouchedBeforeTheTransactionCanCommit() {
+        Tool tool = tool(4L);
+        MediaAsset retainedMedia = inlineImage(8L);
+        ToolMedia retained = new ToolMedia(tool, retainedMedia, 0, NOW.minusSeconds(60));
         MediaAsset invalid = inlineImage(7L);
         invalid.setStatus(MediaStatus.DELETING);
         when(mediaAssetRepository.lockById(7L)).thenReturn(Optional.of(invalid));
 
         assertThatIllegalArgumentException().isThrownBy(() -> service()
-                .synchronize(tool(4L), "![image](/api/media/assets/7)"));
+                .synchronize(tool, "![image](/api/media/assets/7)"));
 
         verify(toolMediaRepository, never()).deleteAllInBatch(any());
         verify(toolMediaRepository, never()).saveAll(any());
+        assertThat(retained.getMedia().getId()).isEqualTo(8L);
+        assertThat(retained.getSortOrder()).isZero();
     }
 
     @Test
