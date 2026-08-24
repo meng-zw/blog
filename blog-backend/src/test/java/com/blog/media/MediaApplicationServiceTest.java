@@ -303,14 +303,19 @@ class MediaApplicationServiceTest {
     }
 
     @Test
-    void redirectsOnlyReadyMediaToItsCurrentProviderUrl() {
+    void redirectsOnlyAfterAuthoritativelyInspectingTheReadySnapshot() {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
         MediaAsset asset = pendingAsset(42L, 7L);
         asset.setStatus(MediaStatus.READY);
-        when(fixture.mediaRepository.findById(42L)).thenReturn(Optional.of(asset));
+        when(fixture.readTransactions.readySnapshot(42L)).thenReturn(
+                new MediaReadTransactionService.ReadyMediaSnapshot(42L, location(asset), asset.getContentType(),
+                        asset.getOriginalFilename(), asset.getByteSize(), asset.getPurpose()));
+        when(fixture.storage.inspect(location(asset))).thenReturn(
+                new StoredObject(asset.getStorageKey(), asset.getContentType(), asset.getByteSize(), "etag-1"));
         when(fixture.storage.resolvePublicUrl(location(asset))).thenReturn(URI.create("https://cdn.example/asset.png"));
 
         assertThat(fixture.service.resolvePublic(42L).location()).isEqualTo(URI.create("https://cdn.example/asset.png"));
+        verify(fixture.storage).inspect(location(asset));
     }
 
     @Test
@@ -325,17 +330,22 @@ class MediaApplicationServiceTest {
         asset.setBucket("archive-media");
         asset.setStatus(MediaStatus.READY);
         com.blog.media.storage.ObjectLocation persisted = location(asset);
-        when(mediaRepository.findById(42L)).thenReturn(Optional.of(asset));
         when(registry.get(StorageProvider.R2)).thenReturn(r2);
+        MediaReadTransactionService reads = mock(MediaReadTransactionService.class);
+        when(reads.readySnapshot(42L)).thenReturn(new MediaReadTransactionService.ReadyMediaSnapshot(
+                42L, persisted, asset.getContentType(), asset.getOriginalFilename(), asset.getByteSize(), asset.getPurpose()));
+        when(r2.inspect(persisted)).thenReturn(
+                new StoredObject(asset.getStorageKey(), asset.getContentType(), asset.getByteSize(), "etag-1"));
         when(r2.resolvePublicUrl(persisted)).thenReturn(URI.create("https://archive.example/asset.png"));
         MediaApplicationService service = new MediaApplicationService(mediaRepository,
                 mock(AdminAccountRepository.class), registry, new MediaContentValidator(properties),
                 mock(MediaReferenceChecker.class), properties, mock(MediaDeletionService.class),
                 mock(MediaDeletionTransactionService.class), mock(MediaOperationTransactionService.class),
-                mock(MediaReadTransactionService.class),
+                reads,
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
         assertThat(service.resolvePublic(42L).location()).hasToString("https://archive.example/asset.png");
+        verify(r2).inspect(persisted);
         verify(r2).resolvePublicUrl(persisted);
     }
 

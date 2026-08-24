@@ -1,5 +1,6 @@
 package com.blog.media.storage.r2;
 
+import com.sun.net.httpserver.HttpServer;
 import com.blog.media.StorageProvider;
 import com.blog.media.storage.ObjectUploadRequest;
 import com.blog.media.storage.ObjectLocation;
@@ -9,10 +10,14 @@ import com.blog.media.storage.UploadTicket;
 import com.blog.media.storage.ObjectStorageException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.http.AbortableInputStream;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
@@ -26,11 +31,18 @@ import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequ
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.io.ByteArrayInputStream;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.URL;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -74,19 +86,52 @@ class R2ObjectStorageTest {
 
     @Test
     void createsDirectUploadsThatCannotOverwriteAnExistingObject() throws Exception {
-        S3Presigner presigner = mock(S3Presigner.class);
-        PresignedPutObjectRequest presigned = mock(PresignedPutObjectRequest.class);
-        when(presigned.url()).thenReturn(new URL("https://account.r2.cloudflarestorage.com/blog-media/inline-images/a.png?X-Amz-Signature=token"));
-        when(presigner.presignPutObject(any(PutObjectPresignRequest.class))).thenReturn(presigned);
+        AtomicReference<byte[]> stored = new AtomicReference<>();
+        HttpServer provider = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        provider.createContext("/", exchange -> {
+            byte[] body = exchange.getRequestBody().readAllBytes();
+            int status;
+            if (!"PUT".equals(exchange.getRequestMethod())
+                    || !"*".equals(exchange.getRequestHeaders().getFirst("If-None-Match"))) {
+                status = 428;
+            } else if (stored.compareAndSet(null, body)) {
+                status = 200;
+            } else {
+                status = 412;
+            }
+            exchange.sendResponseHeaders(status, -1);
+            exchange.close();
+        });
+        provider.start();
 
-        UploadTicket ticket = storage(mock(S3Client.class), presigner)
-                .createDirectUpload(location("inline-images/a.png"),
-                        new ObjectUploadRequest("inline-images/a.png", "image/png", 7));
+        URI endpoint = URI.create("http://localhost:" + provider.getAddress().getPort());
+        try (S3Presigner presigner = S3Presigner.builder()
+                .endpointOverride(endpoint)
+                .credentialsProvider(StaticCredentialsProvider.create(
+                        AwsBasicCredentials.create("test-access-key", "test-secret-key")))
+                .region(Region.of("auto"))
+                .serviceConfiguration(S3Configuration.builder().pathStyleAccessEnabled(true).build())
+                .build()) {
+            UploadTicket ticket = storage(mock(S3Client.class), presigner)
+                    .createDirectUpload(location("inline-images/replay.png"),
+                            new ObjectUploadRequest("inline-images/replay.png", "image/png", 7));
+            assertThat(ticket.requiredHeaders()).containsEntry("If-None-Match", "*");
+            assertThat(ticket.uri().getRawQuery().toLowerCase(java.util.Locale.ROOT))
+                    .contains("x-amz-signedheaders=")
+                    .contains("if-none-match");
 
-        ArgumentCaptor<PutObjectPresignRequest> signedRequest = ArgumentCaptor.forClass(PutObjectPresignRequest.class);
-        verify(presigner).presignPutObject(signedRequest.capture());
-        assertThat(signedRequest.getValue().putObjectRequest().ifNoneMatch()).isEqualTo("*");
-        assertThat(ticket.requiredHeaders()).containsEntry("If-None-Match", "*");
+            HttpClient browser = HttpClient.newHttpClient();
+            HttpResponse<Void> initial = browser.send(uploadRequest(ticket, "initial".getBytes()),
+                    HttpResponse.BodyHandlers.discarding());
+            HttpResponse<Void> replay = browser.send(uploadRequest(ticket, "changed".getBytes()),
+                    HttpResponse.BodyHandlers.discarding());
+
+            assertThat(initial.statusCode()).isEqualTo(200);
+            assertThat(replay.statusCode()).isIn(409, 412);
+            assertThat(stored.get()).isEqualTo("initial".getBytes());
+        } finally {
+            provider.stop(0);
+        }
     }
 
     @Test
@@ -257,6 +302,13 @@ class R2ObjectStorageTest {
 
     private R2ObjectStorage storage(S3Client client, S3Presigner presigner) {
         return new R2ObjectStorage(client, presigner, properties(), Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private static HttpRequest uploadRequest(UploadTicket ticket, byte[] body) {
+        HttpRequest.Builder request = HttpRequest.newBuilder(ticket.uri())
+                .PUT(HttpRequest.BodyPublishers.ofByteArray(body));
+        ticket.requiredHeaders().forEach(request::header);
+        return request.build();
     }
 
     private ObjectLocation location(String objectKey) {

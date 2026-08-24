@@ -13,7 +13,6 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -22,6 +21,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class MediaMigrationMySqlIntegrationTest {
@@ -58,6 +58,17 @@ class MediaMigrationMySqlIntegrationTest {
     }
 
     @Test
+    void locationHashLengthPrefixesEveryIdentityComponent() throws IOException {
+        String migration = Files.readString(MIGRATIONS.resolve("V13__harden_media_location_identity.sql"))
+                .replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+
+        assertThat(migration)
+                .contains("octet_length(provider), ':', provider")
+                .contains("octet_length(bucket), ':', bucket")
+                .contains("octet_length(storage_key), ':', storage_key");
+    }
+
+    @Test
     void migratesAFreshMySqlDatabaseThroughLocationHashIdentity() {
         assumeDockerAvailable();
         cleanDatabase();
@@ -66,8 +77,8 @@ class MediaMigrationMySqlIntegrationTest {
 
         assertThat(result.success).isTrue();
         assertThat(result.targetSchemaVersion).isEqualTo("13");
-        assertThat(indexColumns("media_asset", "uk_media_location_hash"))
-                .containsExactly("location_hash");
+        assertLocationIdentityContract();
+        assertLengthPrefixedIdentityAvoidsDelimiterCollisions();
     }
 
     @Test
@@ -86,8 +97,8 @@ class MediaMigrationMySqlIntegrationTest {
         assertThat(result.success).isTrue();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM media_asset WHERE storage_key = ? AND location_hash IS NOT NULL",
                 Integer.class, "legacy/photo.png")).isOne();
-        assertThat(indexColumns("media_asset", "uk_media_location_hash"))
-                .containsExactly("location_hash");
+        assertLocationIdentityContract();
+        assertDuplicateLocationIsRejected();
     }
 
     private static int declaredLocationIndexWidth(String schema) {
@@ -132,12 +143,54 @@ class MediaMigrationMySqlIntegrationTest {
         return new JdbcTemplate(dataSource());
     }
 
-    private static List<String> indexColumns(String table, String index) {
-        return new ArrayList<>(jdbc().queryForList("""
-                SELECT column_name
+    private static void assertLocationIdentityContract() {
+        List<Map<String, Object>> index = jdbc().queryForList("""
+                SELECT column_name, non_unique
                 FROM information_schema.statistics
-                WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?
+                WHERE table_schema = DATABASE() AND table_name = 'media_asset'
+                  AND index_name = 'uk_media_location_hash'
                 ORDER BY seq_in_index
-                """, String.class, table, index));
+                """);
+        assertThat(index).extracting(row -> row.get("column_name")).containsExactly("location_hash");
+        assertThat(index).extracting(row -> ((Number) row.get("non_unique")).intValue()).containsExactly(0);
+
+        Map<String, Object> generated = jdbc().queryForMap("""
+                SELECT data_type, character_octet_length, generation_expression, extra
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE() AND table_name = 'media_asset' AND column_name = 'location_hash'
+                """);
+        assertThat(generated.get("data_type")).isEqualTo("binary");
+        assertThat(((Number) generated.get("character_octet_length")).intValue()).isEqualTo(32);
+        assertThat(generated.get("extra").toString().toLowerCase(Locale.ROOT)).contains("stored generated");
+        assertThat(generated.get("generation_expression").toString().toLowerCase(Locale.ROOT))
+                .contains("sha2")
+                .contains("octet_length");
+    }
+
+    private static void assertLengthPrefixedIdentityAvoidsDelimiterCollisions() {
+        insertReadyLocation("R2", "a\0b", "c", "first.png");
+        insertReadyLocation("R2", "a", "b\0c", "second.png");
+
+        assertThat(jdbc().queryForObject("SELECT COUNT(*) FROM media_asset WHERE original_filename IN (?, ?)",
+                Integer.class, "first.png", "second.png")).isEqualTo(2);
+        assertThatThrownBy(() -> insertReadyLocation("R2", "a\0b", "c", "duplicate.png"))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+    }
+
+    private static void assertDuplicateLocationIsRejected() {
+        insertReadyLocation("R2", "archive", "inline-images/same.png", "first.png");
+
+        assertThatThrownBy(() -> insertReadyLocation("R2", "archive", "inline-images/same.png", "duplicate.png"))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+    }
+
+    private static void insertReadyLocation(String provider, String bucket, String key, String filename) {
+        jdbc().update("""
+                INSERT INTO media_asset
+                    (provider, bucket, storage_key, status, purpose, original_filename, content_type, byte_size,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, 'READY', 'INLINE_IMAGE', ?, 'image/png', 7,
+                        CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
+                """, provider, bucket, key, filename);
     }
 }

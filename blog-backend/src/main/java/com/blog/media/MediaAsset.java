@@ -8,13 +8,11 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import jakarta.persistence.UniqueConstraint;
 
 import java.time.Instant;
 
 @Entity
-@Table(name = "media_asset", uniqueConstraints = @UniqueConstraint(
-        name = "uk_media_asset_location", columnNames = {"provider", "bucket", "storage_key"}))
+@Table(name = "media_asset")
 public class MediaAsset {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

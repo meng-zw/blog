@@ -197,12 +197,13 @@ public class MediaApplicationService {
         }));
     }
 
-    @Transactional(readOnly = true)
     public PublicMediaAsset resolvePublic(long mediaId) {
-        MediaAsset asset = readyPublicAsset(mediaId);
+        var snapshot = readTransactions.readySnapshot(mediaId);
         try {
-            return new PublicMediaAsset(storage(asset).resolvePublicUrl(location(asset)), asset.getContentType(),
-                    asset.getOriginalFilename(), asset.getPurpose());
+            ObjectStorage storage = storageRegistry.get(snapshot.location().provider());
+            storage.inspect(snapshot.location());
+            return new PublicMediaAsset(storage.resolvePublicUrl(snapshot.location()), snapshot.contentType(),
+                    snapshot.filename(), snapshot.purpose());
         } catch (ObjectStorageException exception) {
             throw exception;
         } catch (RuntimeException exception) {
@@ -269,25 +270,12 @@ public class MediaApplicationService {
         }
     }
 
-    private MediaAsset readyPublicAsset(long mediaId) {
-        MediaAsset asset = mediaRepository.findById(mediaId)
-                .orElseThrow(() -> new ResourceNotFoundException("Media asset", Long.toString(mediaId)));
-        if (asset.getStatus() != MediaStatus.READY) {
-            throw new ResourceNotFoundException("Media asset", Long.toString(mediaId));
-        }
-        return asset;
-    }
-
     private AdminAccount currentAdministrator(String username) {
         if (username == null || username.isBlank()) {
             throw new ResourceNotFoundException("Administrator", "current");
         }
         return adminAccountRepository.findByUsernameAndEnabledTrue(username.strip().toLowerCase(Locale.ROOT))
                 .orElseThrow(() -> new ResourceNotFoundException("Administrator", username));
-    }
-
-    private ObjectStorage storage(MediaAsset asset) {
-        return storageRegistry.get(asset.getProvider());
     }
 
     private static ObjectLocation location(MediaAsset asset) {

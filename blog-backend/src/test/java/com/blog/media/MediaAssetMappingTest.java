@@ -33,13 +33,10 @@ class MediaAssetMappingTest {
     }
 
     @Test
-    void mapsObjectLocationAsTheOnlyUniqueMediaAssetLocation() throws Exception {
+    void leavesMediaLocationUniquenessToTheFlywayGeneratedHash() throws Exception {
         Table table = MediaAsset.class.getAnnotation(Table.class);
 
-        assertThat(table.uniqueConstraints()).anySatisfy(constraint -> {
-            assertThat(constraint.name()).isEqualTo("uk_media_asset_location");
-            assertThat(constraint.columnNames()).containsExactly("provider", "bucket", "storage_key");
-        });
+        assertThat(table.uniqueConstraints()).isEmpty();
         assertThat(field("storageKey").getAnnotation(Column.class).unique()).isFalse();
     }
 
