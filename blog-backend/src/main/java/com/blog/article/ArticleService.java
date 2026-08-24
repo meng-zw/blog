@@ -1,6 +1,7 @@
 package com.blog.article;
 
 import com.blog.article.dto.ArticleDetailResponse;
+import com.blog.article.dto.ArticleAttachmentResponse;
 import com.blog.article.dto.ArticleSummaryResponse;
 import com.blog.article.dto.ArticleWriteRequest;
 import com.blog.article.dto.AdminArticleResponse;
@@ -10,6 +11,8 @@ import com.blog.article.dto.PublicTagResponse;
 import com.blog.article.dto.PublicTopicResponse;
 import com.blog.media.MediaAsset;
 import com.blog.media.MediaAssetRepository;
+import com.blog.media.ArticleMedia;
+import com.blog.media.ArticleMediaReferenceService;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
 import com.blog.shared.web.PageResponse;
@@ -53,21 +56,24 @@ public class ArticleService {
     private final TopicRepository topicRepository;
     private final SlugAllocationLockRepository slugAllocationLockRepository;
     private final TopicMembershipManager topicMembershipManager;
+    private final ArticleMediaReferenceService articleMediaReferenceService;
     private final Clock clock;
 
     @Autowired
     public ArticleService(ArticleRepository articleRepository, MarkdownRenderer markdownRenderer,
                           TaxonomyService taxonomyService, MediaAssetRepository mediaAssetRepository,
                           TopicRepository topicRepository, SlugAllocationLockRepository slugAllocationLockRepository,
-                          TopicMembershipManager topicMembershipManager) {
+                          TopicMembershipManager topicMembershipManager,
+                          ArticleMediaReferenceService articleMediaReferenceService) {
         this(articleRepository, markdownRenderer, taxonomyService, mediaAssetRepository, topicRepository,
-                slugAllocationLockRepository, topicMembershipManager, Clock.systemUTC());
+                slugAllocationLockRepository, topicMembershipManager, articleMediaReferenceService, Clock.systemUTC());
     }
 
     ArticleService(ArticleRepository articleRepository, MarkdownRenderer markdownRenderer,
                    TaxonomyService taxonomyService, MediaAssetRepository mediaAssetRepository,
                    TopicRepository topicRepository, SlugAllocationLockRepository slugAllocationLockRepository,
-                   TopicMembershipManager topicMembershipManager, Clock clock) {
+                   TopicMembershipManager topicMembershipManager,
+                   ArticleMediaReferenceService articleMediaReferenceService, Clock clock) {
         this.articleRepository = articleRepository;
         this.markdownRenderer = markdownRenderer;
         this.taxonomyService = taxonomyService;
@@ -75,6 +81,7 @@ public class ArticleService {
         this.topicRepository = topicRepository;
         this.slugAllocationLockRepository = slugAllocationLockRepository;
         this.topicMembershipManager = topicMembershipManager;
+        this.articleMediaReferenceService = articleMediaReferenceService;
         this.clock = clock;
     }
 
@@ -88,6 +95,7 @@ public class ArticleService {
         apply(article, request, input, true);
         Article saved = articleRepository.save(article);
         topicMembershipManager.synchronizeArticle(saved);
+        articleMediaReferenceService.synchronize(saved, request.markdownContent(), request.attachmentMediaIds());
         return adminDetail(saved);
     }
 
@@ -103,6 +111,7 @@ public class ArticleService {
         apply(article, request, input, !request.markdownContent().equals(article.getMarkdownContent()));
         Article saved = articleRepository.save(article);
         topicMembershipManager.synchronizeArticle(saved);
+        articleMediaReferenceService.synchronize(saved, request.markdownContent(), request.attachmentMediaIds());
         return adminDetail(saved);
     }
 
@@ -303,20 +312,40 @@ public class ArticleService {
                 publicCategory(article.getCategory()), publicTags(article.getTags()));
     }
 
-    private static ArticleDetailResponse detail(Article article, ArticleSummaryResponse previous,
-                                                ArticleSummaryResponse next) {
+    private ArticleDetailResponse detail(Article article, ArticleSummaryResponse previous,
+                                         ArticleSummaryResponse next) {
         return new ArticleDetailResponse(article.getId(), article.getSlug(), article.getTitle(), article.getSummary(),
                 article.getContentType(), article.getPublishedAt(), mediaUrl(article.getCoverMedia()),
                 publicCategory(article.getCategory()), publicTags(article.getTags()), publicTopic(article.getTopic()),
-                article.getRenderedHtml(), article.getSeoTitle(), article.getSeoDescription(), previous, next);
+                article.getRenderedHtml(), article.getSeoTitle(), article.getSeoDescription(), previous, next,
+                attachments(article));
     }
 
-    private static AdminArticleResponse adminDetail(Article article) {
+    private AdminArticleResponse adminDetail(Article article) {
         return new AdminArticleResponse(article.getId(), article.getSlug(), article.getTitle(), article.getSummary(),
                 article.getMarkdownContent(), article.getRenderedHtml(), article.getContentType(), article.getStatus(),
                 article.getPublishedAt(), article.getScheduledAt(), mediaUrl(article.getCoverMedia()), mediaId(article.getCoverMedia()),
                 category(article.getCategory()), tags(article.getTags()), topic(article.getTopic()),
-                article.getSeoTitle(), article.getSeoDescription());
+                article.getSeoTitle(), article.getSeoDescription(), attachments(article));
+    }
+
+    private List<ArticleAttachmentResponse> attachments(Article article) {
+        if (article.getId() == null) {
+            return List.of();
+        }
+        return articleMediaReferenceService.attachmentsFor(article.getId()).stream()
+                .map(ArticleService::attachment)
+                .toList();
+    }
+
+    private static ArticleAttachmentResponse attachment(ArticleMedia reference) {
+        MediaAsset media = reference.getMedia();
+        String displayName = reference.getDisplayName();
+        if (displayName == null || displayName.isBlank()) {
+            displayName = media.getOriginalFilename();
+        }
+        return new ArticleAttachmentResponse(media.getId(), displayName, media.getContentType(), media.getByteSize(),
+                "/api/media/assets/" + media.getId() + "/download");
     }
 
     private static AdminArticleSummaryResponse adminSummary(Article article) {

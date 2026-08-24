@@ -8,5 +8,6 @@ public record ArticleDetailResponse(Long id, String slug, String title, String s
                                     Instant publishedAt, String coverUrl, PublicCategoryResponse category,
                                     List<PublicTagResponse> tags, PublicTopicResponse topic, String renderedHtml,
                                     String seoTitle, String seoDescription,
-                                    ArticleSummaryResponse previous, ArticleSummaryResponse next) {
+                                    ArticleSummaryResponse previous, ArticleSummaryResponse next,
+                                    List<ArticleAttachmentResponse> attachments) {
 }

@@ -7,6 +7,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 
+import java.util.List;
 import java.util.Set;
 
 public record ArticleWriteRequest(
@@ -20,5 +21,6 @@ public record ArticleWriteRequest(
         @Positive Long topicId,
         @NotNull @Size(max = 50) Set<@NotNull @Positive Long> tagIds,
         @Size(max = 70) String seoTitle,
-        @Size(max = 160) String seoDescription) {
+        @Size(max = 160) String seoDescription,
+        @Size(max = 50) List<@NotNull @Positive Long> attachmentMediaIds) {
 }

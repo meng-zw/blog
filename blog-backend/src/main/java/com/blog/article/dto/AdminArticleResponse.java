@@ -13,5 +13,6 @@ public record AdminArticleResponse(Long id, String slug, String title, String su
                                    String renderedHtml, ContentType contentType, ArticleStatus status,
                                    Instant publishedAt, Instant scheduledAt, String coverUrl, Long coverMediaId,
                                    CategoryResponse category, List<TagResponse> tags, TopicResponse topic,
-                                   String seoTitle, String seoDescription) {
+                                   String seoTitle, String seoDescription,
+                                   List<ArticleAttachmentResponse> attachments) {
 }

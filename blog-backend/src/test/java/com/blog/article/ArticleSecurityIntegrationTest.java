@@ -52,7 +52,7 @@ class ArticleSecurityIntegrationTest {
                 null, new PublicCategoryResponse(2L, "Java", "java"),
                 List.of(new PublicTagResponse(3L, "Spring", "spring")),
                 new PublicTopicResponse(4L, "Series", "series"),
-                "<h2 id=\"safe\">Safe</h2>", "SEO", "Description", null, null));
+                "<h2 id=\"safe\">Safe</h2>", "SEO", "Description", null, null, List.of()));
 
         mockMvc.perform(get("/api/public/articles/safe-post").contextPath("/api"))
                 .andExpect(status().isOk())

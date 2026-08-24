@@ -18,7 +18,8 @@ public class MediaReferenceChecker {
         return count("select count(article) from PublishingArticle article where article.coverMedia.id = :mediaId", mediaId) > 0
                 || count("select count(topic) from Topic topic where topic.coverMedia.id = :mediaId", mediaId) > 0
                 || count("select count(tool) from PublishingTool tool where tool.coverMedia.id = :mediaId", mediaId) > 0
-                || count("select count(profile) from SiteProfile profile where profile.avatarMedia.id = :mediaId", mediaId) > 0;
+                || count("select count(profile) from SiteProfile profile where profile.avatarMedia.id = :mediaId", mediaId) > 0
+                || count("select count(articleMedia) from ArticleMedia articleMedia where articleMedia.id.mediaId = :mediaId", mediaId) > 0;
     }
 
     private long count(String query, long mediaId) {

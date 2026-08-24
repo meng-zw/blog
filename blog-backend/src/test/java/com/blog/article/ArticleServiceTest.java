@@ -3,6 +3,9 @@ package com.blog.article;
 import com.blog.article.dto.ArticleWriteRequest;
 import com.blog.media.MediaAsset;
 import com.blog.media.MediaAssetRepository;
+import com.blog.media.ArticleMediaReferenceService;
+import com.blog.media.ArticleMedia;
+import com.blog.media.ArticleMediaRole;
 import com.blog.shared.error.ConflictException;
 import com.blog.taxonomy.Category;
 import com.blog.taxonomy.CategoryScope;
@@ -53,13 +56,14 @@ class ArticleServiceTest {
     @Mock TopicRepository topicRepository;
     @Mock SlugAllocationLockRepository slugAllocationLockRepository;
     @Mock TopicMembershipManager topicMembershipManager;
+    @Mock ArticleMediaReferenceService articleMediaReferenceService;
     private ArticleService articleService;
 
     @BeforeEach
     void setUp() {
         articleService = new ArticleService(articleRepository, markdownRenderer, taxonomyService,
                 mediaAssetRepository, topicRepository, slugAllocationLockRepository,
-                topicMembershipManager, Clock.fixed(NOW, ZoneOffset.UTC));
+                topicMembershipManager, articleMediaReferenceService, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -89,6 +93,7 @@ class ArticleServiceTest {
         ArgumentCaptor<Article> saved = ArgumentCaptor.forClass(Article.class);
         verify(articleRepository).save(saved.capture());
         verify(topicMembershipManager).synchronizeArticle(saved.getValue());
+        verify(articleMediaReferenceService).synchronize(saved.getValue(), "# body", List.of());
         assertThat(saved.getValue().getStatus()).isEqualTo(ArticleStatus.DRAFT);
         assertThat(saved.getValue().getRenderedHtml()).isEqualTo("<h1 id=\"body\">body</h1>");
         assertThat(saved.getValue().getCategory()).isSameAs(category);
@@ -283,6 +288,30 @@ class ArticleServiceTest {
     }
 
     @Test
+    void articleDetailsExposeOrderedPublicAttachmentMetadataWithStableDownloadUrls() {
+        Article draft = article(2L, ArticleStatus.DRAFT, ContentType.NOTE);
+        MediaAsset attachment = new MediaAsset();
+        attachment.setId(31L);
+        attachment.setOriginalFilename("guide.pdf");
+        attachment.setContentType("application/pdf");
+        attachment.setByteSize(1_024L);
+        ArticleMedia reference = new ArticleMedia(draft, attachment, ArticleMediaRole.ATTACHMENT,
+                "Download guide.pdf", 0, NOW);
+        when(articleRepository.findById(2L)).thenReturn(Optional.of(draft));
+        when(articleMediaReferenceService.attachmentsFor(2L)).thenReturn(List.of(reference));
+
+        var response = articleService.findAdmin(2L);
+
+        assertThat(response.attachments()).singleElement().satisfies(value -> {
+            assertThat(value.mediaId()).isEqualTo(31L);
+            assertThat(value.displayName()).isEqualTo("Download guide.pdf");
+            assertThat(value.contentType()).isEqualTo("application/pdf");
+            assertThat(value.byteSize()).isEqualTo(1_024L);
+            assertThat(value.downloadUrl()).isEqualTo("/api/media/assets/31/download");
+        });
+    }
+
+    @Test
     void publishedDetailLoadsOnlySameTypeVisibleNeighbors() {
         Article current = article(2L, ArticleStatus.PUBLISHED, ContentType.NOTE);
         current.setPublishedAt(NOW.minusSeconds(30));
@@ -358,22 +387,22 @@ class ArticleServiceTest {
     private static ArticleWriteRequest request(String title, String markdown, Long coverId, Long categoryId,
                                                 Long topicId, Set<Long> tagIds) {
         return new ArticleWriteRequest(title, null, "Summary", markdown, ContentType.ARTICLE,
-                coverId, categoryId, topicId, tagIds, "SEO", "SEO description");
+                coverId, categoryId, topicId, tagIds, "SEO", "SEO description", List.of());
     }
 
     private static Stream<Arguments> normalizedExpansionRequests() {
         String expansion = "\ufdfa";
         return Stream.of(
                 Arguments.of(new ArticleWriteRequest(expansion.repeat(12), null, "Summary", "body",
-                        ContentType.ARTICLE, null, null, null, Set.of(), null, null)),
+                        ContentType.ARTICLE, null, null, null, Set.of(), null, null, List.of())),
                 Arguments.of(new ArticleWriteRequest("Title", null, expansion.repeat(28), "body",
-                        ContentType.ARTICLE, null, null, null, Set.of(), null, null)),
+                        ContentType.ARTICLE, null, null, null, Set.of(), null, null, List.of())),
                 Arguments.of(new ArticleWriteRequest("Title", expansion.repeat(9), "Summary", "body",
-                        ContentType.ARTICLE, null, null, null, Set.of(), null, null)),
+                        ContentType.ARTICLE, null, null, null, Set.of(), null, null, List.of())),
                 Arguments.of(new ArticleWriteRequest("Title", null, "Summary", "body",
-                        ContentType.ARTICLE, null, null, null, Set.of(), expansion.repeat(4), null)),
+                        ContentType.ARTICLE, null, null, null, Set.of(), expansion.repeat(4), null, List.of())),
                 Arguments.of(new ArticleWriteRequest("Title", null, "Summary", "body",
-                        ContentType.ARTICLE, null, null, null, Set.of(), null, expansion.repeat(9)))
+                        ContentType.ARTICLE, null, null, null, Set.of(), null, expansion.repeat(9), List.of()))
         );
     }
 
