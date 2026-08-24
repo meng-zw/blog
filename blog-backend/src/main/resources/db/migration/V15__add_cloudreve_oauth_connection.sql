@@ -15,5 +15,6 @@ CREATE TABLE cloudreve_connection (
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     PRIMARY KEY (id),
-    UNIQUE KEY uk_cloudreve_connection_singleton (singleton_key)
+    UNIQUE KEY uk_cloudreve_connection_singleton (singleton_key),
+    CONSTRAINT chk_cloudreve_connection_singleton CHECK (singleton_key = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

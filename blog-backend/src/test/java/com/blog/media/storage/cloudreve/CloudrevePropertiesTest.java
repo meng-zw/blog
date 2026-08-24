@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import java.net.URI;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -33,6 +34,33 @@ class CloudrevePropertiesTest {
         assertThat(properties.tokenUri()).isEqualTo(URI.create("https://identity.example:9443/token"));
         assertThat(properties.refreshUri()).isEqualTo(URI.create("https://identity.example:9443/refresh"));
         assertThat(properties.userInfoUri()).isEqualTo(URI.create("https://identity.example:9443/userinfo"));
+    }
+
+    @Test
+    void requiresTheBaseUrlEvenWhenEveryOAuthEndpointIsOverridden() {
+        CloudreveProperties properties = configuredProperties();
+        properties.setBaseUrl(null);
+        setOAuthOverrides(properties);
+
+        assertThatThrownBy(properties::validate)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cloudreve base URL is required");
+    }
+
+    @Test
+    void rejectsUnsafeBaseUrlsUsedByTheLaterFileApi() {
+        for (URI unsafeBaseUrl : List.of(
+                URI.create("https://client:credential@cloud.example"),
+                URI.create("https://cloud.example?unexpected=value"),
+                URI.create("https://cloud.example#fragment"),
+                URI.create("https://*.cloud.example"))) {
+            CloudreveProperties properties = configuredProperties();
+            properties.setBaseUrl(unsafeBaseUrl);
+
+            assertThatThrownBy(properties::validate)
+                    .as("base URL %s", unsafeBaseUrl)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     @Test
@@ -95,6 +123,27 @@ class CloudrevePropertiesTest {
     }
 
     @Test
+    void requiresBaseUrlWhenCloudreveIsEnabledEvenIfOAuthEndpointsAreAllOverridden() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(CloudreveConfiguration.class)
+                .withPropertyValues(
+                        "blog.media.provider=local",
+                        "blog.media.cloudreve.enabled=true",
+                        "blog.media.cloudreve.authorization-uri=https://identity.example/authorize",
+                        "blog.media.cloudreve.token-uri=https://identity.example/token",
+                        "blog.media.cloudreve.refresh-uri=https://identity.example/refresh",
+                        "blog.media.cloudreve.userinfo-uri=https://identity.example/userinfo",
+                        "blog.media.cloudreve.redirect-uri=https://blog.example/api/admin/media/cloudreve/callback",
+                        "blog.media.cloudreve.client-id=client-id",
+                        "blog.media.cloudreve.client-secret=client-secret",
+                        "blog.media.cloudreve.token-encryption-key=AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasMessageContaining("Cloudreve base URL is required");
+                });
+    }
+
+    @Test
     void keepsCloudreveReadableWhenLocalRemainsTheDefaultUploadProvider() {
         new ApplicationContextRunner()
                 .withUserConfiguration(CloudreveConfiguration.class)
@@ -128,5 +177,12 @@ class CloudrevePropertiesTest {
         properties.setClientSecret("client-secret");
         properties.setTokenEncryptionKey("AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=");
         return properties;
+    }
+
+    private static void setOAuthOverrides(CloudreveProperties properties) {
+        properties.setAuthorizationUri(URI.create("https://identity.example/authorize"));
+        properties.setTokenUri(URI.create("https://identity.example/token"));
+        properties.setRefreshUri(URI.create("https://identity.example/refresh"));
+        properties.setUserInfoUri(URI.create("https://identity.example/userinfo"));
     }
 }

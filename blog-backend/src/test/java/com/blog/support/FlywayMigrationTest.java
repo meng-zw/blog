@@ -55,6 +55,11 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
                 INSERT INTO cloudreve_connection (singleton_key, status)
                 VALUES (1, 'DISCONNECTED')
                 """)).isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO cloudreve_connection (singleton_key, status)
+                VALUES (2, 'DISCONNECTED')
+                """)).isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test

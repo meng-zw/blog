@@ -69,6 +69,7 @@ public class CloudreveProperties {
             throw new IllegalArgumentException("Cloudreve token encryption key must differ from the client secret");
         }
         validateEncryptionKey(tokenEncryptionKey);
+        validateBaseUrl(baseUrl);
         validateUri(authorizationUri(), "Cloudreve authorization URI");
         validateUri(tokenUri(), "Cloudreve token URI");
         validateUri(refreshUri(), "Cloudreve refresh URI");
@@ -100,6 +101,16 @@ public class CloudreveProperties {
         if ("https".equalsIgnoreCase(uri.getScheme())) return;
         if (allowTrustedInternalHttp && "http".equalsIgnoreCase(uri.getScheme())) return;
         throw new IllegalArgumentException(name + " must use HTTPS unless trusted internal HTTP is enabled");
+    }
+
+    private void validateBaseUrl(URI uri) {
+        if (uri == null) {
+            throw new IllegalArgumentException("Cloudreve base URL is required");
+        }
+        validateUri(uri, "Cloudreve base URL");
+        if (uri.getRawQuery() != null) {
+            throw new IllegalArgumentException("Cloudreve base URL must not include a query");
+        }
     }
 
     private static void validateEncryptionKey(String key) {
