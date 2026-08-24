@@ -9,6 +9,8 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -34,6 +36,13 @@ public class AdminMediaController {
     @PostMapping("/uploads")
     public MediaUploadPlanResponse requestUpload(@Valid @RequestBody MediaUploadRequest request, Authentication authentication) {
         return mediaApplicationService.requestUpload(request, authentication.getName());
+    }
+
+    @GetMapping
+    public com.blog.shared.web.PageResponse<com.blog.media.dto.AdminMediaAssetResponse> list(
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "24") int size,
+            @RequestParam(required = false) MediaStatus status, @RequestParam(required = false) MediaPurpose purpose) {
+        return mediaApplicationService.list(page, size, status, purpose);
     }
 
     @PutMapping(value = "/uploads/{mediaId}/content", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

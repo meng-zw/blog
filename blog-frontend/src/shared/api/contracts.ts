@@ -78,14 +78,10 @@ export interface MediaAssetResponse {
   url: string
 }
 
-/** @deprecated Transitional compatibility for callers migrated in Task 9. */
-export interface MediaUploadResponse {
-  id: number
-  storageKey: string
-  contentType: string
-  width: number | null
-  height: number | null
-  url: string
+export interface AdminMediaAssetResponse extends MediaAssetResponse {
+  provider: 'LOCAL' | 'R2'
+  referenced: boolean
+  createdAt: IsoDateTime
 }
 
 export interface CategoryResponse {

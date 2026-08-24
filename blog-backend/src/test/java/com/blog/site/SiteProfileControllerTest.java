@@ -6,6 +6,8 @@ import com.blog.identity.AdminUserDetailsService;
 import com.blog.identity.LoginAttemptService;
 import com.blog.media.MediaAssetRepository;
 import com.blog.media.MediaAsset;
+import com.blog.media.MediaPurpose;
+import com.blog.media.MediaStatus;
 import com.blog.shared.error.GlobalExceptionHandler;
 import com.blog.shared.web.TraceIdFilter;
 import org.junit.jupiter.api.BeforeEach;
@@ -98,13 +100,16 @@ class SiteProfileControllerTest {
         MediaAsset avatar = new MediaAsset();
         avatar.setId(42L);
         avatar.setStorageKey("existing-avatar.png");
+        avatar.setContentType("image/png");
+        avatar.setStatus(MediaStatus.READY);
+        avatar.setPurpose(MediaPurpose.AVATAR);
         seededProfile.setAvatarMedia(avatar);
         when(mediaAssetRepository.findById(42L)).thenReturn(Optional.of(avatar));
 
         mockMvc.perform(get("/api/admin/settings").contextPath("/api"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.avatar_media_id").value(42))
-                .andExpect(jsonPath("$.avatar_url").value("/api/media/existing-avatar.png"));
+                .andExpect(jsonPath("$.avatar_url").value("/api/media/assets/42"));
 
         mockMvc.perform(put("/api/admin/settings")
                         .contextPath("/api")
@@ -115,7 +120,7 @@ class SiteProfileControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.subtitle").value("且听风吟"))
                 .andExpect(jsonPath("$.avatar_media_id").value(42))
-                .andExpect(jsonPath("$.avatar_url").value("/api/media/existing-avatar.png"));
+                .andExpect(jsonPath("$.avatar_url").value("/api/media/assets/42"));
 
         verify(mediaAssetRepository).findById(42L);
     }

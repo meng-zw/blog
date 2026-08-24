@@ -5,6 +5,9 @@ import com.blog.article.ArticleRepository;
 import com.blog.article.ArticleService;
 import com.blog.media.MediaAsset;
 import com.blog.media.MediaAssetRepository;
+import com.blog.media.MediaApplicationService;
+import com.blog.media.MediaPurpose;
+import com.blog.media.MediaStatus;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
 import com.blog.shared.web.PageResponse;
@@ -143,7 +146,7 @@ public class TopicService {
         if (!normalizedName.equals(topic.getNormalizedName())) topic.setSlug(nextSlug(TaxonomyService.slugBase(name, "topic"), topic.getSlug()));
         topic.setNormalizedName(normalizedName);
         topic.setDescription(request.description() == null ? null : Normalizer.normalize(request.description(), Normalizer.Form.NFKC).trim());
-        topic.setCoverMedia(requireImage(request.coverMediaId()));
+        topic.setCoverMedia(requireCover(request.coverMediaId(), topic.getCoverMedia()));
         topic.setStatus(request.status());
         topic.setSortOrder(request.sortOrder());
     }
@@ -179,12 +182,16 @@ public class TopicService {
         return article.isVisibleAt(now);
     }
 
-    private MediaAsset requireImage(Long id) {
+    private MediaAsset requireCover(Long id, MediaAsset existing) {
         if (id == null) return null;
         MediaAsset media = mediaAssetRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Cover media asset", id.toString()));
         if (media.getContentType() == null || !media.getContentType().toLowerCase(java.util.Locale.ROOT).startsWith("image/")) {
             throw new IllegalArgumentException("Cover media must be an image");
+        }
+        if (media.getStatus() != MediaStatus.READY) throw new IllegalArgumentException("Cover media must be ready");
+        if (media.getPurpose() != MediaPurpose.TOPIC_COVER && (existing == null || !media.getId().equals(existing.getId()))) {
+            throw new IllegalArgumentException("Cover media purpose must be TOPIC_COVER");
         }
         return media;
     }
@@ -207,7 +214,7 @@ public class TopicService {
 
     private static TopicResponse response(Topic topic) {
         MediaAsset cover = topic.getCoverMedia();
-        String coverUrl = cover == null ? null : "/api/media/" + cover.getStorageKey();
+        String coverUrl = MediaApplicationService.stableUrl(cover);
         return new TopicResponse(topic.getId(), topic.getName(), topic.getSlug(), topic.getDescription(), coverUrl,
                 topic.getStatus(), topic.getSortOrder());
     }
@@ -221,7 +228,7 @@ public class TopicService {
 
     private static PublicTopicSummaryResponse publicResponse(Topic topic) {
         MediaAsset cover = topic.getCoverMedia();
-        String coverUrl = cover == null ? null : "/api/media/" + cover.getStorageKey();
+        String coverUrl = MediaApplicationService.stableUrl(cover);
         return new PublicTopicSummaryResponse(topic.getId(), topic.getName(), topic.getSlug(),
                 topic.getDescription(), coverUrl);
     }

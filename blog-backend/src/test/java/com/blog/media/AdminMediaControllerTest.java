@@ -23,6 +23,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Instant;
 import java.util.Map;
 import java.io.InputStream;
+import java.util.List;
+import com.blog.media.dto.AdminMediaAssetResponse;
+import com.blog.shared.web.PageResponse;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -32,6 +35,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -100,6 +104,22 @@ class AdminMediaControllerTest {
         mockMvc.perform(delete("/api/admin/media/42").contextPath("/api").with(user("owner").roles("ADMIN")).with(csrf()))
                 .andExpect(status().isNoContent());
         verify(mediaApplicationService).delete(42L, "owner");
+    }
+
+    @Test
+    void administratorCanFilterProviderNeutralMediaLibraryAndSeesReferenceState() throws Exception {
+        when(mediaApplicationService.list(0, 24, MediaStatus.READY, MediaPurpose.TOOL_COVER)).thenReturn(
+                new PageResponse<>(List.of(new AdminMediaAssetResponse(7L, "tool.png", "image/png", 42L,
+                        1, 1, StorageProvider.R2, MediaStatus.READY, MediaPurpose.TOOL_COVER, true,
+                        "/api/media/assets/7", Instant.parse("2026-08-24T00:00:00Z"))), 0, 24, 1, 1));
+
+        mockMvc.perform(get("/api/admin/media").contextPath("/api").with(user("owner").roles("ADMIN"))
+                        .param("status", "READY").param("purpose", "TOOL_COVER"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].provider").value("R2"))
+                .andExpect(jsonPath("$.items[0].referenced").value(true))
+                .andExpect(jsonPath("$.items[0].url").value("/api/media/assets/7"));
+        verify(mediaApplicationService).list(0, 24, MediaStatus.READY, MediaPurpose.TOOL_COVER);
     }
 
     private static MediaResponse response(long id) {

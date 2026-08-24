@@ -1,4 +1,4 @@
-import type { MediaAssetResponse, MediaPurpose, MediaUploadPlanResponse, MediaUploadResponse } from '../../shared/api/contracts'
+import type { AdminMediaAssetResponse, MediaPurpose, MediaStatus, MediaUploadPlanResponse, MediaAssetResponse } from '../../shared/api/contracts'
 import { http } from '../../shared/api/http'
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -40,13 +40,10 @@ export function completeMediaUpload(mediaId: number): Promise<MediaAssetResponse
   return http.post<MediaAssetResponse>(`/admin/media/${mediaId}/complete`)
 }
 
-/** @deprecated Use uploadMedia from uploader.ts. Kept until existing cover/avatar callers migrate. */
-export async function uploadMedia(file: File, purpose: MediaPurpose = 'INLINE_IMAGE', onProgress?: (percent: number) => void): Promise<MediaUploadResponse> {
-  const { uploadMedia: upload } = await import('./uploader')
-  const response = await upload(file, purpose, onProgress)
-  return {
-    ...response,
-    id: response.mediaId,
-    storageKey: response.filename
-  }
+export interface MediaPage { items: AdminMediaAssetResponse[]; page: number; size: number; total: number; totalPages: number }
+
+export function listMedia(page = 0, size = 24, status?: MediaStatus, purpose?: MediaPurpose): Promise<MediaPage> {
+  return http.get<MediaPage>('/admin/media', { query: { page, size, status, purpose } })
 }
+
+export function deleteMedia(mediaId: number): Promise<void> { return http.delete<void>(`/admin/media/${mediaId}`) }

@@ -6,6 +6,8 @@ import com.blog.media.MediaAssetRepository;
 import com.blog.media.ArticleMediaReferenceService;
 import com.blog.media.ArticleMedia;
 import com.blog.media.ArticleMediaRole;
+import com.blog.media.MediaPurpose;
+import com.blog.media.MediaStatus;
 import com.blog.shared.error.ConflictException;
 import com.blog.taxonomy.Category;
 import com.blog.taxonomy.CategoryScope;
@@ -111,6 +113,32 @@ class ArticleServiceTest {
         assertThatIllegalArgumentException().isThrownBy(() -> articleService.createDraft(
                 request("Title", "body", 4L, null, null, Set.of())));
         verify(articleRepository, never()).save(any());
+    }
+
+    @Test
+    void newArticleCoverMustBeReadyAndHaveArticleCoverPurposeWhileExistingLegacyCoverRemainsValid() {
+        MediaAsset wrongPurpose = image(4L);
+        wrongPurpose.setPurpose(MediaPurpose.INLINE_IMAGE);
+        wrongPurpose.setStatus(MediaStatus.READY);
+        when(mediaAssetRepository.findById(4L)).thenReturn(Optional.of(wrongPurpose));
+
+        assertThatIllegalArgumentException().isThrownBy(() -> articleService.createDraft(
+                request("Title", "body", 4L, null, null, Set.of())))
+                .withMessageContaining("ARTICLE_COVER");
+
+        Article existing = article(2L, ArticleStatus.DRAFT, ContentType.ARTICLE);
+        existing.setCoverMedia(wrongPurpose);
+        when(articleRepository.findById(2L)).thenReturn(Optional.of(existing));
+        when(articleRepository.save(existing)).thenReturn(existing);
+        articleService.update(2L, request("Changed", "body", 4L, null, null, Set.of()));
+        assertThat(existing.getCoverMedia()).isSameAs(wrongPurpose);
+    }
+
+    @Test
+    void articleResponsesUseStableMediaIdUrls() {
+        Article article = article(2L, ArticleStatus.PUBLISHED, ContentType.ARTICLE);
+        article.setCoverMedia(image(12L));
+        assertThat(ArticleService.summary(article).coverUrl()).isEqualTo("/api/media/assets/12");
     }
 
     @Test
@@ -450,6 +478,8 @@ class ArticleServiceTest {
         media.setId(id);
         media.setStorageKey("cover.png");
         media.setContentType("image/png");
+        media.setStatus(MediaStatus.READY);
+        media.setPurpose(MediaPurpose.ARTICLE_COVER);
         return media;
     }
 }

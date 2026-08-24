@@ -5,6 +5,7 @@ import com.blog.identity.AdminAccountRepository;
 import com.blog.media.dto.MediaResponse;
 import com.blog.media.dto.MediaUploadPlanResponse;
 import com.blog.media.dto.MediaUploadRequest;
+import com.blog.media.dto.AdminMediaAssetResponse;
 import com.blog.media.storage.ObjectStorage;
 import com.blog.media.storage.ObjectStorageRegistry;
 import com.blog.media.storage.ObjectUploadRequest;
@@ -14,6 +15,9 @@ import com.blog.media.storage.UploadTicket;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import com.blog.shared.web.PageResponse;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
@@ -167,6 +171,16 @@ public class MediaApplicationService {
     }
 
     @Transactional(readOnly = true)
+    public PageResponse<AdminMediaAssetResponse> list(int page, int size, MediaStatus status, MediaPurpose purpose) {
+        if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("Page size must be between 1 and 100");
+        return PageResponse.from(mediaRepository.findAdminPage(status, purpose,
+                PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))))
+                .map(asset -> new AdminMediaAssetResponse(asset.getId(), asset.getOriginalFilename(), asset.getContentType(),
+                        asset.getByteSize(), asset.getWidth(), asset.getHeight(), asset.getProvider(), asset.getStatus(),
+                        asset.getPurpose(), referenceChecker.isReferenced(asset.getId()), stableUrl(asset), asset.getCreatedAt())));
+    }
+
+    @Transactional(readOnly = true)
     public PublicMediaAsset resolvePublic(long mediaId) {
         MediaAsset asset = readyPublicAsset(mediaId);
         return new PublicMediaAsset(storage(asset).resolvePublicUrl(asset.getStorageKey()), asset.getContentType(),
@@ -275,7 +289,12 @@ public class MediaApplicationService {
 
     private static MediaResponse response(MediaAsset asset) {
         return new MediaResponse(asset.getId(), asset.getOriginalFilename(), asset.getContentType(), asset.getByteSize(),
-                asset.getWidth(), asset.getHeight(), asset.getStatus(), asset.getPurpose(), "/api/media/assets/" + asset.getId());
+                asset.getWidth(), asset.getHeight(), asset.getStatus(), asset.getPurpose(), stableUrl(asset));
+    }
+
+    /** Provider-neutral URL used by every business response and persisted Markdown reference. */
+    public static String stableUrl(MediaAsset asset) {
+        return asset == null || asset.getId() == null ? null : "/api/media/assets/" + asset.getId();
     }
 
     private static String objectKey(MediaPurpose purpose, String contentType) {

@@ -11,6 +11,9 @@ import com.blog.article.dto.PublicTagResponse;
 import com.blog.article.dto.PublicTopicResponse;
 import com.blog.media.MediaAsset;
 import com.blog.media.MediaAssetRepository;
+import com.blog.media.MediaApplicationService;
+import com.blog.media.MediaPurpose;
+import com.blog.media.MediaStatus;
 import com.blog.media.ArticleMedia;
 import com.blog.media.ArticleMediaReferenceService;
 import com.blog.shared.error.ConflictException;
@@ -223,7 +226,7 @@ public class ArticleService {
         }
         article.setMarkdownContent(request.markdownContent());
         article.setContentType(request.contentType());
-        article.setCoverMedia(requireImage(request.coverMediaId()));
+        article.setCoverMedia(requireCover(request.coverMediaId(), article.getCoverMedia()));
         article.setCategory(request.categoryId() == null ? null
                 : taxonomyService.requireCategory(request.categoryId(), CategoryScope.ARTICLE));
         article.setTopic(request.topicId() == null ? null : topicRepository.findById(request.topicId())
@@ -233,7 +236,7 @@ public class ArticleService {
         article.setSeoDescription(input.seoDescription());
     }
 
-    private MediaAsset requireImage(Long id) {
+    private MediaAsset requireCover(Long id, MediaAsset existing) {
         if (id == null) {
             return null;
         }
@@ -241,6 +244,12 @@ public class ArticleService {
                 .orElseThrow(() -> new ResourceNotFoundException("Cover media asset", id.toString()));
         if (media.getContentType() == null || !media.getContentType().toLowerCase(Locale.ROOT).startsWith("image/")) {
             throw new IllegalArgumentException("Cover media must be an image");
+        }
+        if (media.getStatus() != MediaStatus.READY) {
+            throw new IllegalArgumentException("Cover media must be ready");
+        }
+        if (media.getPurpose() != MediaPurpose.ARTICLE_COVER && (existing == null || !media.getId().equals(existing.getId()))) {
+            throw new IllegalArgumentException("Cover media purpose must be ARTICLE_COVER");
         }
         return media;
     }
@@ -391,7 +400,7 @@ public class ArticleService {
     }
 
     private static String mediaUrl(MediaAsset media) {
-        return media == null ? null : "/api/media/" + media.getStorageKey();
+        return MediaApplicationService.stableUrl(media);
     }
 
     private static String normalizeRequired(String value, String field) {

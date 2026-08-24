@@ -32,7 +32,8 @@
 import { nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { AdminArticleSummaryResponse, TopicWriteRequest } from '../../../shared/api/contracts'
-import { ACCEPTED_IMAGE_TYPES, uploadMedia } from '../../media/api'
+import { ACCEPTED_IMAGE_TYPES } from '../../media/api'
+import { uploadMedia } from '../../media/uploader'
 import { listAdminArticles, lookupAdminArticles } from '../../articles/admin-api'
 import { createTopic, listTopics, loadTopic, removeTopic, updateTopic, type AdminTopic } from '../admin-api'
 const route=useRoute(),router=useRouter(),page=ref(Math.max(0,Number(route.query.page)||0)),statusFilter=ref(String(route.query.status??'')),keywordFilter=ref(String(route.query.keyword??'')),totalPages=ref(0),topics=ref<AdminTopic[]>([]),articleResults=ref<AdminArticleSummaryResponse[]>([]),selectedArticles=ref(new Map<number,AdminArticleSummaryResponse>()),articlePage=ref(0),articleTotalPages=ref(0),articleKeyword=ref(''),editingId=ref<number|null>(null),error=ref(''),confirmDialog=ref<HTMLDialogElement>(),deleteId=ref<number|null>(null),deleteName=ref(''),coverUrl=ref(''),dragIndex=ref(-1)
@@ -49,7 +50,7 @@ function move(i:number,d:number){const j=i+d;if(j<0||j>=form.articleIds.length)r
 function dropAt(index:number){if(dragIndex.value<0||dragIndex.value===index)return;const [id]=form.articleIds.splice(dragIndex.value,1);if(id!==undefined)form.articleIds.splice(index,0,id);dragIndex.value=-1}
 async function edit(t:AdminTopic){const detail=await loadTopic(t.id);const selected=detail.articleIds.length?await lookupAdminArticles(detail.articleIds):[];selectedArticles.value=new Map(selected.map(a=>[a.id,a]));editingId.value=detail.id;Object.assign(form,{name:detail.name,description:detail.description??'',status:detail.status,sortOrder:detail.sortOrder,articleIds:[...detail.articleIds],coverMediaId:detail.coverMediaId});coverUrl.value=detail.coverUrl??''}
 function reset(){editingId.value=null;selectedArticles.value.clear();Object.assign(form,{name:'',description:'',status:'DRAFT',sortOrder:0,articleIds:[],coverMediaId:null});coverUrl.value=''}
-async function uploadCover(e:Event){const file=(e.target as HTMLInputElement).files?.[0];if(!file)return;try{const media=await uploadMedia(file);form.coverMediaId=media.id;coverUrl.value=media.url}catch{error.value='专题封面上传失败'}}
+async function uploadCover(e:Event){const file=(e.target as HTMLInputElement).files?.[0];if(!file)return;try{const media=await uploadMedia(file,'TOPIC_COVER');form.coverMediaId=media.mediaId;coverUrl.value=media.url}catch{error.value='专题封面上传失败'}}
 async function save(){const request={...form,articleIds:[...form.articleIds]};try{editingId.value?await updateTopic(editingId.value,request):await createTopic(request);reset();await load()}catch{error.value='专题保存失败'}}
 async function askDelete(id:number,name:string){deleteId.value=id;deleteName.value=name;if(typeof confirmDialog.value?.showModal==="function")confirmDialog.value.showModal();else confirmDialog.value?.setAttribute("open","");await nextTick();confirmDialog.value?.querySelector<HTMLButtonElement>('button')?.focus()}
 async function remove(){if(!deleteId.value)return;try{await removeTopic(deleteId.value);confirmDialog.value?.close();await load()}catch{error.value='专题删除失败'}}

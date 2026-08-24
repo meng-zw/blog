@@ -5,6 +5,8 @@ import com.blog.article.ArticleRepository;
 import com.blog.article.ArticleStatus;
 import com.blog.article.ContentType;
 import com.blog.media.MediaAssetRepository;
+import com.blog.media.MediaPurpose;
+import com.blog.media.MediaStatus;
 import com.blog.media.MediaAsset;
 import com.blog.taxonomy.SlugAllocationLockRepository;
 import com.blog.topic.dto.TopicWriteRequest;
@@ -238,6 +240,8 @@ class TopicServiceTest {
         cover.setId(8L);
         cover.setStorageKey("topics/java.png");
         cover.setContentType("image/png");
+        cover.setStatus(MediaStatus.READY);
+        cover.setPurpose(MediaPurpose.TOPIC_COVER);
         when(topicRepository.findByNormalizedName("java")).thenReturn(Optional.empty());
         when(topicRepository.existsBySlug("java")).thenReturn(false);
         when(mediaAssetRepository.findById(8L)).thenReturn(Optional.of(cover));
@@ -250,7 +254,23 @@ class TopicServiceTest {
         var created = topicService.create(new TopicWriteRequest(
                 "Java", null, 8L, TopicStatus.PUBLISHED, List.of(), 0));
 
-        assertThat(created.coverUrl()).isEqualTo("/api/media/topics/java.png");
+        assertThat(created.coverUrl()).isEqualTo("/api/media/assets/8");
+    }
+
+    @Test
+    void newTopicCoverMustBeReadyAndHaveTopicCoverPurpose() {
+        MediaAsset cover = new MediaAsset();
+        cover.setId(8L);
+        cover.setContentType("image/png");
+        cover.setStatus(MediaStatus.PENDING_UPLOAD);
+        cover.setPurpose(MediaPurpose.TOPIC_COVER);
+        when(topicRepository.findByNormalizedName("java")).thenReturn(Optional.empty());
+        when(topicRepository.existsBySlug("java")).thenReturn(false);
+        when(mediaAssetRepository.findById(8L)).thenReturn(Optional.of(cover));
+
+        org.assertj.core.api.Assertions.assertThatIllegalArgumentException().isThrownBy(() -> topicService.create(
+                new TopicWriteRequest("Java", null, 8L, TopicStatus.DRAFT, List.of(), 0)))
+                .withMessageContaining("ready");
     }
 
     @Test

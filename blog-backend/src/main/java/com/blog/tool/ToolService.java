@@ -5,6 +5,9 @@ import com.blog.article.dto.PublicCategoryResponse;
 import com.blog.article.dto.PublicTagResponse;
 import com.blog.media.MediaAsset;
 import com.blog.media.MediaAssetRepository;
+import com.blog.media.MediaApplicationService;
+import com.blog.media.MediaPurpose;
+import com.blog.media.MediaStatus;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
 import com.blog.shared.web.PageResponse;
@@ -184,19 +187,23 @@ public class ToolService {
         }
         tool.setDescriptionMarkdown(request.descriptionMarkdown());
         tool.setOfficialUrl(input.officialUrl());
-        tool.setCoverMedia(requireImage(request.coverMediaId()));
+        tool.setCoverMedia(requireCover(request.coverMediaId(), tool.getCoverMedia()));
         tool.setCategory(request.categoryId() == null ? null
                 : taxonomyService.requireCategory(request.categoryId(), CategoryScope.TOOL));
         tool.setTags(taxonomyService.requireTags(request.tagIds()));
         tool.setFeatured(request.featured());
     }
 
-    private MediaAsset requireImage(Long id) {
+    private MediaAsset requireCover(Long id, MediaAsset existing) {
         if (id == null) return null;
         MediaAsset media = mediaAssetRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Cover media asset", id.toString()));
         if (media.getContentType() == null || !media.getContentType().toLowerCase(Locale.ROOT).startsWith("image/")) {
             throw new IllegalArgumentException("Cover media must be an image");
+        }
+        if (media.getStatus() != MediaStatus.READY) throw new IllegalArgumentException("Cover media must be ready");
+        if (media.getPurpose() != MediaPurpose.TOOL_COVER && (existing == null || !media.getId().equals(existing.getId()))) {
+            throw new IllegalArgumentException("Cover media purpose must be TOOL_COVER");
         }
         return media;
     }
@@ -274,7 +281,7 @@ public class ToolService {
     }
 
     private static String mediaUrl(MediaAsset media) {
-        return media == null ? null : "/api/media/" + media.getStorageKey();
+        return MediaApplicationService.stableUrl(media);
     }
 
     private static Long mediaId(MediaAsset media) { return media == null ? null : media.getId(); }

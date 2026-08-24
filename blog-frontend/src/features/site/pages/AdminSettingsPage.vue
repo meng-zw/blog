@@ -55,7 +55,8 @@
 import { onMounted, reactive, ref } from 'vue'
 import type { UpdateSiteProfileRequest } from '../../../shared/api/contracts'
 import { ApiProblem } from '../../../shared/api/problem'
-import { ACCEPTED_IMAGE_TYPES, imageFileHint, uploadMedia } from '../../media/api'
+import { ACCEPTED_IMAGE_TYPES, imageFileHint } from '../../media/api'
+import { uploadMedia } from '../../media/uploader'
 import { loadAdminSettings, updateAdminSettings } from '../admin-api'
 import { updateSharedPublicProfile } from '../public-profile'
 
@@ -116,8 +117,8 @@ async function chooseAvatar(event: Event): Promise<void> {
   }
   uploading.value = true
   try {
-    const uploaded = await uploadMedia(file)
-    form.avatarMediaId = uploaded.id
+    const uploaded = await uploadMedia(file, 'AVATAR')
+    form.avatarMediaId = uploaded.mediaId
     avatarUrl.value = uploaded.url
   } catch (error: unknown) {
     showError(error, '无法上传图片，请检查网络后重试。')

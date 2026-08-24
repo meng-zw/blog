@@ -3,6 +3,8 @@ package com.blog.tool;
 import com.blog.article.MarkdownRenderer;
 import com.blog.media.MediaAsset;
 import com.blog.media.MediaAssetRepository;
+import com.blog.media.MediaPurpose;
+import com.blog.media.MediaStatus;
 import com.blog.shared.error.ConflictException;
 import com.blog.taxonomy.Category;
 import com.blog.taxonomy.CategoryScope;
@@ -162,6 +164,17 @@ class ToolServiceTest {
     }
 
     @Test
+    void newToolCoverMustBeReadyAndHaveToolCoverPurpose() {
+        MediaAsset media = image(4L);
+        media.setPurpose(MediaPurpose.ARTICLE_COVER);
+        when(mediaAssetRepository.findById(4L)).thenReturn(Optional.of(media));
+
+        assertThatIllegalArgumentException().isThrownBy(() -> toolService.createDraft(request("Tool", null, "Summary",
+                "body", "https://example.com", 4L, null, Set.of(), false, 0)))
+                .withMessageContaining("TOOL_COVER");
+    }
+
+    @Test
     void publicQueriesUseDatabasePaginationFiltersAndRequiredOrdering() {
         Tool first = tool(1L, ToolStatus.PUBLISHED, "body");
         first.setFeatured(true);
@@ -301,6 +314,8 @@ class ToolServiceTest {
         media.setId(id);
         media.setStorageKey("tool.png");
         media.setContentType("image/png");
+        media.setStatus(MediaStatus.READY);
+        media.setPurpose(MediaPurpose.TOOL_COVER);
         return media;
     }
 }

@@ -21,9 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -55,16 +53,13 @@ class MediaControllerTest {
     Path mediaDirectory;
 
     @Test
-    void invalidUploadReturnsProblemDetailsWithTraceId() throws Exception {
-        doThrow(new IllegalArgumentException("Image signature does not match its declared type"))
-                .when(mediaStorageService).store(any());
-
+    void legacyAdministrativeUploadRouteHasBeenRemoved() throws Exception {
         mockMvc.perform(multipart("/api/admin/media")
                         .file("file", "not an image".getBytes())
                         .contextPath("/api")
                         .with(user("owner").roles("ADMIN"))
                         .with(csrf()))
-                .andExpect(status().isBadRequest())
+                .andExpect(status().isNotFound())
                 .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
                 .andExpect(jsonPath("$.traceId").isNotEmpty());
     }

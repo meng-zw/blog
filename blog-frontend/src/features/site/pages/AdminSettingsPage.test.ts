@@ -3,15 +3,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SiteProfileResponse } from '../../../shared/api/contracts'
 import { loadAdminSettings, updateAdminSettings } from '../admin-api'
-import { uploadMedia } from '../../media/api'
+import { uploadMedia } from '../../media/uploader'
 import { readSharedPublicProfile, resetSharedPublicProfile } from '../public-profile'
 import AdminSettingsPage from './AdminSettingsPage.vue'
 
 vi.mock('../admin-api', () => ({ loadAdminSettings: vi.fn(), updateAdminSettings: vi.fn() }))
 vi.mock('../../media/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../media/api')>()
-  return { ...actual, uploadMedia: vi.fn() }
+  return actual
 })
+vi.mock('../../media/uploader', () => ({ uploadMedia: vi.fn() }))
 
 const profile: SiteProfileResponse & { avatarMediaId: number | null } = {
   siteTitle: '小M的思与行', subtitle: '中庸之道', nickname: '小M', bio: '中庸之道',
@@ -47,7 +48,7 @@ describe('admin settings page', () => {
 
   it('uploads an avatar, saves its media id and propagates the returned public profile', async () => {
     vi.mocked(uploadMedia).mockResolvedValue({
-      id: 23, storageKey: 'new-badge.png', contentType: 'image/png', width: 512, height: 512,
+      mediaId: 23, filename: 'new-badge.png', contentType: 'image/png', byteSize: 10, width: 512, height: 512, status: 'READY', purpose: 'AVATAR',
       url: '/api/media/new-badge.png'
     })
     const updated = { ...profile, siteTitle: '山中笔记', avatarUrl: '/api/media/new-badge.png' }
