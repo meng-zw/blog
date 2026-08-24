@@ -9,6 +9,9 @@ import com.blog.taxonomy.SlugAllocationLock;
 import com.blog.taxonomy.SlugAllocationLockRepository;
 import com.blog.media.MediaAsset;
 import com.blog.media.MediaAssetRepository;
+import com.blog.media.ToolMedia;
+import com.blog.media.ToolMediaReferenceService;
+import com.blog.media.ToolMediaRepository;
 import com.blog.article.MarkdownRenderer;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
@@ -55,12 +58,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ToolPublishingMySqlIntegrationTest {
     @SpringBootConfiguration
     @EnableAutoConfiguration(exclude = JpaRepositoriesAutoConfiguration.class)
-    @EntityScan(basePackageClasses = {Tool.class, Category.class, Tag.class, MediaAsset.class, SlugAllocationLock.class})
+    @EntityScan(basePackageClasses = {Tool.class, Category.class, Tag.class, MediaAsset.class, ToolMedia.class,
+            SlugAllocationLock.class})
     @EnableJpaRepositories(basePackageClasses = {ToolRepository.class, CategoryRepository.class, TagRepository.class,
-            MediaAssetRepository.class, SlugAllocationLockRepository.class})
+            MediaAssetRepository.class, ToolMediaRepository.class, SlugAllocationLockRepository.class})
     @EnableTransactionManagement
     @EnableJpaAuditing
-    @Import({ToolService.class, TaxonomyService.class, MarkdownRenderer.class})
+    @Import({ToolService.class, ToolMediaReferenceService.class, TaxonomyService.class, MarkdownRenderer.class})
     static class ToolTestApplication {
     }
     @Container

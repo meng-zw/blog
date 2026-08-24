@@ -5,6 +5,7 @@ import com.blog.media.MediaAsset;
 import com.blog.media.MediaAssetRepository;
 import com.blog.media.MediaPurpose;
 import com.blog.media.MediaStatus;
+import com.blog.media.ToolMediaReferenceService;
 import com.blog.shared.error.ConflictException;
 import com.blog.taxonomy.Category;
 import com.blog.taxonomy.CategoryScope;
@@ -34,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -46,12 +48,13 @@ class ToolServiceTest {
     @Mock TaxonomyService taxonomyService;
     @Mock MediaAssetRepository mediaAssetRepository;
     @Mock SlugAllocationLockRepository slugAllocationLockRepository;
+    @Mock ToolMediaReferenceService toolMediaReferenceService;
     private ToolService toolService;
 
     @BeforeEach
     void setUp() {
         toolService = new ToolService(toolRepository, markdownRenderer, taxonomyService, mediaAssetRepository,
-                slugAllocationLockRepository, Clock.fixed(NOW, ZoneOffset.UTC));
+                slugAllocationLockRepository, toolMediaReferenceService, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -86,12 +89,14 @@ class ToolServiceTest {
         assertThat(saved.getValue().getTags()).containsExactly(tag);
         assertThat(saved.getValue().getCoverMedia()).isSameAs(cover);
         assertThat(saved.getValue().getStatus()).isEqualTo(ToolStatus.DRAFT);
+        verify(toolMediaReferenceService).synchronize(saved.getValue(), "# Safe");
     }
 
     @Test
     void descriptionMarkdownUsesTheSharedSanitizingRenderer() {
         ToolService realRendererService = new ToolService(toolRepository, new MarkdownRenderer(), taxonomyService,
-                mediaAssetRepository, slugAllocationLockRepository, Clock.fixed(NOW, ZoneOffset.UTC));
+                mediaAssetRepository, slugAllocationLockRepository, toolMediaReferenceService,
+                Clock.fixed(NOW, ZoneOffset.UTC));
         when(toolRepository.existsBySlug("tool")).thenReturn(false);
         when(toolRepository.findMaxSortOrder()).thenReturn(-1);
         when(toolRepository.save(any(Tool.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -116,6 +121,7 @@ class ToolServiceTest {
 
         verify(markdownRenderer, never()).render(any());
         assertThat(tool.getRenderedHtml()).isEqualTo("<p>trusted</p>");
+        verify(toolMediaReferenceService).synchronize(tool, "same");
     }
 
     @Test
@@ -267,7 +273,9 @@ class ToolServiceTest {
 
         toolService.delete(2L);
 
-        verify(toolRepository).delete(deleted);
+        var deletion = inOrder(toolMediaReferenceService, toolRepository);
+        deletion.verify(toolMediaReferenceService).removeAll(deleted);
+        deletion.verify(toolRepository).delete(deleted);
         assertThat(first.getSortOrder()).isZero();
         assertThat(last.getSortOrder()).isEqualTo(1);
         verify(toolRepository).saveAll(List.of(first, last));

@@ -22,7 +22,8 @@ public class MediaReferenceChecker {
                 || count("select count(topic) from Topic topic where topic.coverMedia.id = :mediaId", mediaId) > 0
                 || count("select count(tool) from PublishingTool tool where tool.coverMedia.id = :mediaId", mediaId) > 0
                 || count("select count(profile) from SiteProfile profile where profile.avatarMedia.id = :mediaId", mediaId) > 0
-                || count("select count(articleMedia) from ArticleMedia articleMedia where articleMedia.id.mediaId = :mediaId", mediaId) > 0;
+                || count("select count(articleMedia) from ArticleMedia articleMedia where articleMedia.id.mediaId = :mediaId", mediaId) > 0
+                || count("select count(toolMedia) from ToolMedia toolMedia where toolMedia.id.mediaId = :mediaId", mediaId) > 0;
     }
 
     /** Constant-query page lookup; never call the single-item check in a list mapper. */
@@ -35,6 +36,7 @@ public class MediaReferenceChecker {
         addIds(referenced, "select tool.coverMedia.id from PublishingTool tool where tool.coverMedia.id in :ids", ids);
         addIds(referenced, "select profile.avatarMedia.id from SiteProfile profile where profile.avatarMedia.id in :ids", ids);
         addIds(referenced, "select articleMedia.id.mediaId from ArticleMedia articleMedia where articleMedia.id.mediaId in :ids", ids);
+        addIds(referenced, "select toolMedia.id.mediaId from ToolMedia toolMedia where toolMedia.id.mediaId in :ids", ids);
         return Set.copyOf(referenced);
     }
 

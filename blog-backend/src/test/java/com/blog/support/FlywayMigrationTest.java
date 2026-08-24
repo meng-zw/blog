@@ -16,14 +16,14 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
     @Autowired DataSource dataSource;
 
     @Test
-    void migratesAnEmptyDatabaseToVersionThirteen() {
+    void migratesAnEmptyDatabaseToVersionFourteen() {
         var flyway = Flyway.configure().dataSource(dataSource).load();
         assertThat(flyway.info().current()).isNull();
 
         var result = flyway.migrate();
         assertThat(result.success).isTrue();
-        assertThat(result.migrationsExecuted).isEqualTo(13);
-        assertThat(result.targetSchemaVersion).isEqualTo("13");
+        assertThat(result.migrationsExecuted).isEqualTo(14);
+        assertThat(result.targetSchemaVersion).isEqualTo("14");
     }
 
     @Test
@@ -75,6 +75,34 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
                 .isInstanceOf(DataIntegrityViolationException.class);
         jdbc.update("DELETE FROM article WHERE id = ?", articleId);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM article_media WHERE media_id = ?", Integer.class, mediaId))
+                .isZero();
+    }
+
+    @Test
+    void toolMediaReferencesCascadeWithToolsButKeepMediaAssetsProtected() {
+        var flyway = Flyway.configure().dataSource(dataSource).load();
+        assertThat(flyway.migrate().success).isTrue();
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        jdbc.update("""
+                INSERT INTO media_asset
+                    (provider, bucket, storage_key, status, purpose, original_filename, content_type, byte_size,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
+                """, "LOCAL", "", "inline-images/tool-example.png", "READY", "INLINE_IMAGE", "tool-example.png",
+                "image/png", 42L);
+        Long mediaId = jdbc.queryForObject("SELECT id FROM media_asset WHERE storage_key = ?", Long.class,
+                "inline-images/tool-example.png");
+        jdbc.update("""
+                INSERT INTO tool (slug, name, summary, description_markdown, official_url, status, featured, sort_order)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, "tool-media-reference", "Tool media reference", "Summary", "body", "https://example.com", "DRAFT", false, 0);
+        Long toolId = jdbc.queryForObject("SELECT id FROM tool WHERE slug = ?", Long.class, "tool-media-reference");
+        jdbc.update("INSERT INTO tool_media (tool_id, media_id, sort_order) VALUES (?, ?, ?)", toolId, mediaId, 0);
+
+        assertThatThrownBy(() -> jdbc.update("DELETE FROM media_asset WHERE id = ?", mediaId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        jdbc.update("DELETE FROM tool WHERE id = ?", toolId);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM tool_media WHERE media_id = ?", Integer.class, mediaId))
                 .isZero();
     }
 

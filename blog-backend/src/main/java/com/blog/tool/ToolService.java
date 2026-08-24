@@ -8,6 +8,7 @@ import com.blog.media.MediaAssetRepository;
 import com.blog.media.MediaApplicationService;
 import com.blog.media.MediaPurpose;
 import com.blog.media.MediaStatus;
+import com.blog.media.ToolMediaReferenceService;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
 import com.blog.shared.web.PageResponse;
@@ -54,23 +55,26 @@ public class ToolService {
     private final TaxonomyService taxonomyService;
     private final MediaAssetRepository mediaAssetRepository;
     private final SlugAllocationLockRepository slugAllocationLockRepository;
+    private final ToolMediaReferenceService toolMediaReferenceService;
     private final Clock clock;
 
     @Autowired
     public ToolService(ToolRepository toolRepository, MarkdownRenderer markdownRenderer, TaxonomyService taxonomyService,
-                       MediaAssetRepository mediaAssetRepository, SlugAllocationLockRepository slugAllocationLockRepository) {
+                       MediaAssetRepository mediaAssetRepository, SlugAllocationLockRepository slugAllocationLockRepository,
+                       ToolMediaReferenceService toolMediaReferenceService) {
         this(toolRepository, markdownRenderer, taxonomyService, mediaAssetRepository, slugAllocationLockRepository,
-                Clock.systemUTC());
+                toolMediaReferenceService, Clock.systemUTC());
     }
 
     ToolService(ToolRepository toolRepository, MarkdownRenderer markdownRenderer, TaxonomyService taxonomyService,
                 MediaAssetRepository mediaAssetRepository, SlugAllocationLockRepository slugAllocationLockRepository,
-                Clock clock) {
+                ToolMediaReferenceService toolMediaReferenceService, Clock clock) {
         this.toolRepository = toolRepository;
         this.markdownRenderer = markdownRenderer;
         this.taxonomyService = taxonomyService;
         this.mediaAssetRepository = mediaAssetRepository;
         this.slugAllocationLockRepository = slugAllocationLockRepository;
+        this.toolMediaReferenceService = toolMediaReferenceService;
         this.clock = clock;
     }
 
@@ -83,7 +87,9 @@ public class ToolService {
         tool.setStatus(ToolStatus.DRAFT);
         tool.setSortOrder(nextGlobalSortOrder());
         apply(tool, request, input, true);
-        return adminDetail(toolRepository.save(tool));
+        Tool saved = toolRepository.save(tool);
+        toolMediaReferenceService.synchronize(saved, request.descriptionMarkdown());
+        return adminDetail(saved);
     }
 
     @Transactional
@@ -96,6 +102,7 @@ public class ToolService {
         }
         updateExplicitSlug(tool, input.slug());
         apply(tool, request, input, !request.descriptionMarkdown().equals(tool.getDescriptionMarkdown()));
+        toolMediaReferenceService.synchronize(tool, request.descriptionMarkdown());
         return adminDetail(toolRepository.save(tool));
     }
 
@@ -123,6 +130,7 @@ public class ToolService {
         slugAllocationLockRepository.lockSingleton();
         Tool tool = requireTool(id);
         List<Tool> remaining = toolRepository.findAllForReorder().stream().filter(candidate -> !candidate.getId().equals(id)).toList();
+        toolMediaReferenceService.removeAll(tool);
         toolRepository.delete(tool);
         for (int index = 0; index < remaining.size(); index++) remaining.get(index).setSortOrder(index);
         if (!remaining.isEmpty()) toolRepository.saveAll(remaining);
