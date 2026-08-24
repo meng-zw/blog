@@ -13,10 +13,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /** Backfills stable Markdown image references for tools that predate tool_media. */
 public class V14_1__backfill_tool_media_references extends BaseJavaMigration {
@@ -33,8 +31,7 @@ public class V14_1__backfill_tool_media_references extends BaseJavaMigration {
             if (page.isEmpty()) {
                 break;
             }
-            Map<Long, LegacyMediaState> mediaStates = loadMediaStates(context.getConnection(), page, parser);
-            insertPage(context.getConnection(), page, parser, mediaStates, counters);
+            insertPage(context.getConnection(), page, parser, counters);
             lastToolId = page.getLast().id();
         }
         log.info("tool_media backfill inserted={} skippedMissing={} skippedNotReady={} skippedWrongPurpose={}",
@@ -65,13 +62,9 @@ public class V14_1__backfill_tool_media_references extends BaseJavaMigration {
         return page;
     }
 
-    /** Loads all distinct media states for a page with one lookup, retaining skip diagnostics. */
-    private static Map<Long, LegacyMediaState> loadMediaStates(Connection connection, List<ToolMarkdown> page,
-                                                                StableMediaReferenceParser parser) throws SQLException {
-        Set<Long> mediaIds = new LinkedHashSet<>();
-        for (ToolMarkdown tool : page) {
-            mediaIds.addAll(parser.parse(tool.markdown()));
-        }
+    /** Loads one bounded, distinct media-ID chunk while retaining skip diagnostics. */
+    private static Map<Long, LegacyMediaState> loadMediaStates(Connection connection, List<Long> mediaIds)
+            throws SQLException {
         Map<Long, LegacyMediaState> states = new LinkedHashMap<>();
         for (Long mediaId : mediaIds) {
             states.put(mediaId, LegacyMediaState.MISSING);
@@ -97,38 +90,33 @@ public class V14_1__backfill_tool_media_references extends BaseJavaMigration {
         return states;
     }
 
-    /** Inserts the page in one INSERT IGNORE batch so pre-existing references remain unchanged. */
+    /** Inserts in fixed-size INSERT IGNORE batches so pre-existing references remain unchanged. */
     private static void insertPage(Connection connection, List<ToolMarkdown> page, StableMediaReferenceParser parser,
-                                   Map<Long, LegacyMediaState> mediaStates, Counters counters) throws SQLException {
-        List<ToolMediaInsert> inserts = new ArrayList<>();
-        for (ToolMarkdown tool : page) {
-            int sortOrder = 0;
-            for (Long mediaId : parser.parse(tool.markdown())) {
-                LegacyMediaState state = mediaStates.getOrDefault(mediaId, LegacyMediaState.MISSING);
+                                   Counters counters) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT IGNORE INTO tool_media (tool_id, media_id, sort_order) VALUES (?, ?, ?)")) {
+            InsertBatch batch = new InsertBatch(statement, counters);
+            for (ToolMarkdown tool : page) {
+                addToolReferences(connection, parser.parse(tool.markdown()), tool.id(), batch, counters);
+            }
+            batch.flush();
+        }
+    }
+
+    private static void addToolReferences(Connection connection, List<Long> mediaIds, long toolId, InsertBatch batch,
+                                          Counters counters) throws SQLException {
+        int[] sortOrder = {0};
+        BackfillBatching.forEachChunk(mediaIds, BackfillBatching.MAX_MEDIA_IDS_PER_LOOKUP, mediaChunk -> {
+            Map<Long, LegacyMediaState> states = loadMediaStates(connection, mediaChunk);
+            for (Long mediaId : mediaChunk) {
+                LegacyMediaState state = states.getOrDefault(mediaId, LegacyMediaState.MISSING);
                 if (state == LegacyMediaState.VALID) {
-                    inserts.add(new ToolMediaInsert(tool.id(), mediaId, sortOrder++));
+                    batch.add(toolId, mediaId, sortOrder[0]++);
                 } else {
                     counters.recordSkip(state);
                 }
             }
-        }
-        if (inserts.isEmpty()) {
-            return;
-        }
-        try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT IGNORE INTO tool_media (tool_id, media_id, sort_order) VALUES (?, ?, ?)")) {
-            for (ToolMediaInsert insert : inserts) {
-                statement.setLong(1, insert.toolId());
-                statement.setLong(2, insert.mediaId());
-                statement.setInt(3, insert.sortOrder());
-                statement.addBatch();
-            }
-            for (int updated : statement.executeBatch()) {
-                if (updated != 0 && updated != Statement.EXECUTE_FAILED) {
-                    counters.inserted++;
-                }
-            }
-        }
+        });
     }
 
     private static LegacyMediaState legacyMediaState(ResultSet result) throws SQLException {
@@ -147,9 +135,6 @@ public class V14_1__backfill_tool_media_references extends BaseJavaMigration {
     private record ToolMarkdown(long id, String markdown) {
     }
 
-    private record ToolMediaInsert(long toolId, long mediaId, int sortOrder) {
-    }
-
     private static final class Counters {
         private int inserted;
         private int missing;
@@ -165,4 +150,39 @@ public class V14_1__backfill_tool_media_references extends BaseJavaMigration {
             }
         }
     }
+
+    private static final class InsertBatch {
+        private final PreparedStatement statement;
+        private final Counters counters;
+        private int size;
+
+        private InsertBatch(PreparedStatement statement, Counters counters) {
+            this.statement = statement;
+            this.counters = counters;
+        }
+
+        private void add(long toolId, long mediaId, int sortOrder) throws SQLException {
+            statement.setLong(1, toolId);
+            statement.setLong(2, mediaId);
+            statement.setInt(3, sortOrder);
+            statement.addBatch();
+            size++;
+            if (size == BackfillBatching.MAX_INSERT_ROWS) {
+                flush();
+            }
+        }
+
+        private void flush() throws SQLException {
+            if (size == 0) {
+                return;
+            }
+            for (int updated : statement.executeBatch()) {
+                if (updated != 0 && updated != Statement.EXECUTE_FAILED) {
+                    counters.inserted++;
+                }
+            }
+            size = 0;
+        }
+    }
+
 }
