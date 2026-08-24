@@ -8,6 +8,14 @@ export const MAX_ZIP_ATTACHMENT_BYTES = 50 * 1024 * 1024
 export const ACCEPTED_ATTACHMENT_TYPES = 'application/pdf,application/zip,application/x-zip-compressed,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation'
 const ACCEPTED_IMAGE_TYPE_SET: ReadonlySet<string> = new Set(ACCEPTED_IMAGE_TYPES.split(','))
 const ACCEPTED_ATTACHMENT_TYPE_SET: ReadonlySet<string> = new Set(ACCEPTED_ATTACHMENT_TYPES.split(','))
+const ATTACHMENT_CONTENT_TYPES: Readonly<Record<string, string>> = {
+  pdf: 'application/pdf',
+  zip: 'application/zip',
+  txt: 'text/plain',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+}
 
 export function imageFileHint(file: File): string | null {
   if (!file.type.startsWith('image/')) return '只能选择图片文件，服务器会再次校验格式和文件签名。'
@@ -27,10 +35,20 @@ export function attachmentFileHint(file: File): string | null {
   return null
 }
 
+function uploadContentType(file: File, purpose: MediaPurpose): string {
+  const browserType = file.type.trim().toLowerCase()
+  if (purpose !== 'ATTACHMENT') return browserType
+  const extension = file.name.split('.').pop()?.toLowerCase()
+  const canonicalType = extension ? ATTACHMENT_CONTENT_TYPES[extension] : undefined
+  if (browserType === 'application/x-zip-compressed' && extension === 'zip') return 'application/zip'
+  if ((!browserType || browserType === 'application/octet-stream') && canonicalType) return canonicalType
+  return browserType
+}
+
 export function requestMediaUpload(file: File, purpose: MediaPurpose): Promise<MediaUploadPlanResponse> {
   return http.post<MediaUploadPlanResponse>('/admin/media/uploads', {
     filename: file.name,
-    contentType: file.type,
+    contentType: uploadContentType(file, purpose),
     byteSize: file.size,
     purpose
   })

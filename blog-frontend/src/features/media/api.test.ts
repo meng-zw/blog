@@ -6,6 +6,7 @@ const fetchMock = vi.fn<typeof fetch>()
 
 describe('media API', () => {
   beforeEach(() => {
+    fetchMock.mockReset()
     vi.stubGlobal('fetch', fetchMock)
     document.cookie = 'XSRF-TOKEN=media-csrf; path=/'
   })
@@ -34,6 +35,25 @@ describe('media API', () => {
       mediaId: 8, uploadMode: 'DIRECT', method: 'PUT', uploadUrl: 'https://r2.example/asset.png',
       headers: { 'Content-Type': 'image/png' }, expiresAt: '2026-08-24T10:15:00Z'
     })
+  })
+
+  it.each([
+    ['manual.pdf', '', 'application/pdf'],
+    ['archive.zip', 'application/x-zip-compressed', 'application/zip'],
+    ['notes.txt', 'application/octet-stream', 'text/plain'],
+    ['report.docx', '', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+    ['workbook.xlsx', 'application/octet-stream', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
+    ['slides.pptx', '', 'application/vnd.openxmlformats-officedocument.presentationml.presentation']
+  ])('canonicalizes the upload-plan MIME for %s when the browser reports %s', async (filename, browserType, expectedType) => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      media_id: 9, upload_mode: 'PROXY', method: 'PUT', upload_url: '/api/admin/media/uploads/9/content',
+      headers: { 'Content-Type': expectedType }, expires_at: '2026-08-24T10:15:00Z'
+    }), { headers: { 'Content-Type': 'application/json' } }))
+
+    await requestMediaUpload(new File(['attachment'], filename, { type: browserType }), 'ATTACHMENT')
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { content_type: string }
+    expect(body.content_type).toBe(expectedType)
   })
 
   it('completes an uploaded media asset and returns its stable URL', async () => {

@@ -9,7 +9,7 @@ vi.mock('./api', () => ({
   completeMediaUpload: vi.fn()
 }))
 
-type UploadBehavior = { status?: number, error?: boolean }
+type UploadBehavior = { status?: number, error?: boolean, pending?: boolean, timeout?: boolean }
 let behavior: UploadBehavior[] = []
 let requests: FakeXmlHttpRequest[] = []
 
@@ -22,11 +22,20 @@ class FakeXmlHttpRequest {
   status = 0
   readyState = 0
   responseText = ''
+  timeout = 0
+  aborted = false
   onload: (() => void) | null = null
   onerror: (() => void) | null = null
-  upload = { addEventListener: vi.fn((type: string, listener: (event: ProgressEvent) => void) => {
-    if (type === 'progress') this.progressListener = listener
-  }) }
+  ontimeout: (() => void) | null = null
+  onabort: (() => void) | null = null
+  upload = {
+    addEventListener: vi.fn((type: string, listener: (event: ProgressEvent) => void) => {
+      if (type === 'progress') this.progressListener = listener
+    }),
+    removeEventListener: vi.fn((type: string, listener: (event: ProgressEvent) => void) => {
+      if (type === 'progress' && this.progressListener === listener) this.progressListener = null
+    })
+  }
   private progressListener: ((event: ProgressEvent) => void) | null = null
 
   open(method: string, url: string): void { this.method = method; this.url = url }
@@ -34,6 +43,11 @@ class FakeXmlHttpRequest {
   send(): void {
     this.progressListener?.({ lengthComputable: true, loaded: 2, total: 4 } as ProgressEvent)
     const next = behavior.shift() ?? { status: 204 }
+    if (next.pending) return
+    if (next.timeout) {
+      this.ontimeout?.()
+      return
+    }
     if (next.error) {
       this.onerror?.()
       return
@@ -41,6 +55,13 @@ class FakeXmlHttpRequest {
     this.status = next.status ?? 204
     this.readyState = FakeXmlHttpRequest.DONE
     this.onload?.()
+  }
+  abort(): void {
+    this.aborted = true
+    this.onabort?.()
+  }
+  emitProgress(loaded: number, total: number): void {
+    this.progressListener?.({ lengthComputable: true, loaded, total } as ProgressEvent)
   }
 }
 
@@ -140,5 +161,72 @@ describe('media uploader', () => {
       .rejects.toThrow('HTTP 400')
 
     expect(requests).toHaveLength(1)
+  })
+
+  it('times out a stalled upload without retrying or completing the media asset', async () => {
+    behavior = [{ timeout: true }]
+    vi.mocked(requestMediaUpload).mockResolvedValue(directPlan)
+
+    const result = uploadMedia(
+      new File(['data'], 'diagram.png', { type: 'image/png' }),
+      'INLINE_IMAGE',
+      undefined,
+      { timeoutMs: 1_234 }
+    )
+    const outcome = await Promise.race([
+      result.then(() => 'resolved', (error: unknown) => error instanceof Error ? error.message : String(error)),
+      new Promise<string>((resolve) => setTimeout(() => resolve('pending'), 0))
+    ])
+
+    expect(outcome).toContain('超时')
+    expect(requests).toHaveLength(1)
+    expect(requests[0]?.timeout).toBe(1_234)
+    expect(requests[0]?.aborted).toBe(true)
+    expect(completeMediaUpload).not.toHaveBeenCalled()
+  })
+
+  it('aborts a stalled upload through AbortSignal without completing the media asset', async () => {
+    behavior = [{ pending: true }]
+    vi.mocked(requestMediaUpload).mockResolvedValue(directPlan)
+    const controller = new AbortController()
+    const result = uploadMedia(
+      new File(['data'], 'diagram.png', { type: 'image/png' }),
+      'INLINE_IMAGE',
+      undefined,
+      { signal: controller.signal }
+    )
+    await Promise.resolve()
+
+    controller.abort()
+    const outcome = await Promise.race([
+      result.then(() => 'resolved', (error: unknown) => (
+        typeof error === 'object' && error !== null && 'name' in error ? String(error.name) : String(error)
+      )),
+      new Promise<string>((resolve) => setTimeout(() => resolve('pending'), 0))
+    ])
+
+    expect(outcome).toBe('AbortError')
+    expect(requests[0]?.aborted).toBe(true)
+    expect(completeMediaUpload).not.toHaveBeenCalled()
+  })
+
+  it('removes abort and progress listeners after a successful upload settles', async () => {
+    vi.mocked(requestMediaUpload).mockResolvedValue(directPlan)
+    vi.mocked(completeMediaUpload).mockResolvedValue(ready)
+    const controller = new AbortController()
+    const progress = vi.fn()
+
+    await uploadMedia(
+      new File(['data'], 'diagram.png', { type: 'image/png' }),
+      'INLINE_IMAGE',
+      progress,
+      { signal: controller.signal }
+    )
+    const progressCalls = progress.mock.calls.length
+    controller.abort()
+    requests[0]?.emitProgress(3, 4)
+
+    expect(requests[0]?.aborted).toBe(false)
+    expect(progress).toHaveBeenCalledTimes(progressCalls)
   })
 })

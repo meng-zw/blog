@@ -48,7 +48,9 @@ describe('MarkdownEditor media uploads', () => {
     resolveUpload({ mediaId: 123, filename: '图[1].png', contentType: 'image/png', byteSize: 4, width: 2, height: 2, status: 'READY', purpose: 'INLINE_IMAGE', url: '/api/media/assets/123' })
 
     await expect(result).resolves.toBeNull()
-    expect(uploadMedia).toHaveBeenCalledWith(expect.any(File), 'INLINE_IMAGE', expect.any(Function))
+    expect(uploadMedia).toHaveBeenCalledWith(expect.any(File), 'INLINE_IMAGE', expect.any(Function), {
+      signal: expect.any(AbortSignal)
+    })
     expect(insertValue).toHaveBeenCalledWith('\n![图\\[1\\]](/api/media/assets/123)\n')
     wrapper.unmount()
   })
@@ -128,6 +130,21 @@ describe('MarkdownEditor media uploads', () => {
     resolveUpload({ mediaId: 16, filename: 'gone.png', contentType: 'image/png', byteSize: 1, width: 1, height: 1, status: 'READY', purpose: 'INLINE_IMAGE', url: '/api/media/assets/16' })
     await expect(result).resolves.toBeNull()
     expect(insertValue).not.toHaveBeenCalled()
+  })
+
+  it('cancels an active upload when the editor unmounts', async () => {
+    let uploadSignal: AbortSignal | undefined
+    vi.mocked(uploadMedia).mockImplementation((_file, _purpose, _progress, options) => {
+      uploadSignal = options?.signal
+      return new Promise(() => {})
+    })
+    const { wrapper, handler } = await editorUpload()
+
+    void handler([new File(['data'], 'cancel.png', { type: 'image/png' })])
+    await flushPromises()
+    wrapper.unmount()
+
+    expect(uploadSignal?.aborted).toBe(true)
   })
 
   it('ignores upload progress reported after the editor has unmounted', async () => {

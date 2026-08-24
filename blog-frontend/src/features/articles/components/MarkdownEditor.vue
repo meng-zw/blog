@@ -22,6 +22,7 @@ const uploadError = ref('')
 let editor: { getValue?: () => string, setValue?: (value: string) => void, insertValue?: (value: string) => void, destroy?: () => void } | undefined
 type VditorUploadHandler = (files: File[]) => string | null | Promise<string> | Promise<null>
 let destroyed = false
+let uploadController: AbortController | undefined
 
 function escapedAltText(filename: string): string {
   const basename = filename.replace(/\.[^.]+$/, '') || '图片'
@@ -52,12 +53,14 @@ async function handleUpload(files: File[]): Promise<string | null> {
   uploadProgress.value = 0
   uploadError.value = ''
   const originalSelection = captureSelection()
+  const controller = new AbortController()
+  uploadController = controller
   try {
     for (const [index, file] of acceptedFiles.entries()) {
       const media = await uploadMedia(file, 'INLINE_IMAGE', (progress) => {
         if (destroyed) return
         uploadProgress.value = Math.round(((index + progress / 100) / acceptedFiles.length) * 100)
-      })
+      }, { signal: controller.signal })
       if (destroyed) return null
       if (index === 0) restoreSelection(originalSelection)
       editor?.insertValue?.(`\n![${escapedAltText(file.name)}](${media.url})\n`)
@@ -68,6 +71,7 @@ async function handleUpload(files: File[]): Promise<string | null> {
     uploadError.value = '图片上传失败，请检查网络后重试。'
     return uploadError.value
   } finally {
+    if (uploadController === controller) uploadController = undefined
     if (!destroyed) uploading.value = false
   }
 }
@@ -94,7 +98,7 @@ onMounted(async () => {
 })
 
 watch(() => props.modelValue, (value) => { if (editor?.getValue?.() !== value) editor?.setValue?.(value) })
-onBeforeUnmount(() => { destroyed = true; editor?.destroy?.() })
+onBeforeUnmount(() => { destroyed = true; uploadController?.abort(); editor?.destroy?.() })
 function fallbackInput(event: Event): void { emit('update:modelValue', (event.target as HTMLTextAreaElement).value) }
 </script>
 <style scoped>
