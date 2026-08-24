@@ -1,0 +1,67 @@
+package com.blog.media;
+
+import com.blog.media.dto.MediaResponse;
+import com.blog.media.dto.MediaUploadPlanResponse;
+import com.blog.media.dto.MediaUploadRequest;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+
+/** Administrative transport layer for the provider-neutral media upload protocol. */
+@RestController
+@RequestMapping("/admin/media")
+public class AdminMediaController {
+    private final MediaApplicationService mediaApplicationService;
+
+    public AdminMediaController(MediaApplicationService mediaApplicationService) {
+        this.mediaApplicationService = mediaApplicationService;
+    }
+
+    @PostMapping("/uploads")
+    public MediaUploadPlanResponse requestUpload(@Valid @RequestBody MediaUploadRequest request, Authentication authentication) {
+        return mediaApplicationService.requestUpload(request, authentication.getName());
+    }
+
+    @PutMapping(value = "/uploads/{mediaId}/content", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Void> uploadMultipart(@PathVariable long mediaId, @RequestPart("file") MultipartFile file,
+                                                Authentication authentication) {
+        try {
+            mediaApplicationService.uploadProxyContent(mediaId, authentication.getName(), file.getInputStream());
+            return ResponseEntity.noContent().build();
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Unable to read uploaded media", exception);
+        }
+    }
+
+    @PutMapping("/uploads/{mediaId}/content")
+    public ResponseEntity<Void> uploadBinary(@PathVariable long mediaId, @RequestBody byte[] content,
+                                             Authentication authentication) {
+        mediaApplicationService.uploadProxyContent(mediaId, authentication.getName(), new ByteArrayInputStream(content));
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/{mediaId}/complete")
+    public MediaResponse complete(@PathVariable long mediaId, Authentication authentication) {
+        return mediaApplicationService.complete(mediaId, authentication.getName());
+    }
+
+    @DeleteMapping("/{mediaId}")
+    public ResponseEntity<Void> delete(@PathVariable long mediaId, Authentication authentication) {
+        mediaApplicationService.delete(mediaId, authentication.getName());
+        return ResponseEntity.status(HttpStatus.NO_CONTENT).build();
+    }
+}
