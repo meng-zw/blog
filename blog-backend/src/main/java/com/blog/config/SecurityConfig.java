@@ -127,6 +127,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/public/**", "/sitemap.xml", "/media/**",
                                 "/actuator/health", "/actuator/health/**", "/admin/session").permitAll()
                         .requestMatchers(HttpMethod.POST, "/admin/session").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/admin/media/cloudreve/callback").hasRole("ADMIN")
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         .anyRequest().denyAll())
                 .exceptionHandling(exceptions -> exceptions

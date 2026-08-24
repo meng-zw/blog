@@ -65,7 +65,12 @@ public class CloudreveTokenService {
     }
 
     public URI beginAuthorization(long adminId) {
+        return beginAuthorization(adminId, null);
+    }
+
+    public URI beginAuthorization(long adminId, String sessionId) {
         requireAdmin(adminId);
+        if (sessionId != null && sessionId.isBlank()) throw new IllegalArgumentException("Administrator session is required");
         Instant now = clock.instant();
         long generation = database.execute(status -> {
             CloudreveConnection connection = connections.findSingletonForUpdate().orElseGet(() -> {
@@ -80,13 +85,17 @@ public class CloudreveTokenService {
         String state = randomUrlToken(32);
         String verifier = randomUrlToken(64);
         authorizationTransactions.save(new CloudreveOAuthTransaction(
-                state, verifier, adminId, now.plus(AUTHORIZATION_TTL), generation), now);
+                state, verifier, adminId, now.plus(AUTHORIZATION_TTL), generation, sessionId), now);
         return oauth.authorizationUri(state, verifier);
     }
 
     public void completeAuthorization(String code, String state, long adminId) {
+        completeAuthorization(code, state, adminId, null);
+    }
+
+    public void completeAuthorization(String code, String state, long adminId, String sessionId) {
         requireAdmin(adminId);
-        CloudreveOAuthTransaction transaction = authorizationTransactions.consume(state, adminId, clock.instant());
+        CloudreveOAuthTransaction transaction = authorizationTransactions.consume(state, adminId, sessionId, clock.instant());
         if (code == null || code.isBlank()) throw new CloudreveAuthorizationRequiredException();
 
         // Both calls are deliberately outside the database transaction.

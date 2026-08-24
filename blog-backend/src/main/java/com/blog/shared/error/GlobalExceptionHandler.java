@@ -1,6 +1,8 @@
 package com.blog.shared.error;
 
 import com.blog.media.storage.ObjectStorageException;
+import com.blog.media.storage.cloudreve.CloudreveAuthorizationRequiredException;
+import com.blog.media.storage.cloudreve.CloudreveOAuthClient;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -53,6 +55,20 @@ public class GlobalExceptionHandler {
                 ? HttpStatus.NOT_FOUND : HttpStatus.SERVICE_UNAVAILABLE;
         return problem(status, status == HttpStatus.NOT_FOUND ? "Resource not found" : "Service unavailable",
                 status == HttpStatus.NOT_FOUND ? "媒体文件不存在" : "媒体存储暂时不可用，请稍后重试", request, null);
+    }
+
+    @ExceptionHandler(CloudreveAuthorizationRequiredException.class)
+    ResponseEntity<ProblemDetail> handleCloudreveAuthorizationRequired(CloudreveAuthorizationRequiredException exception,
+                                                                         HttpServletRequest request) {
+        return problem(HttpStatus.BAD_REQUEST, "Cloudreve authorization required",
+                "Cloudreve 授权无效或已过期，请重新发起授权", request, null);
+    }
+
+    @ExceptionHandler({CloudreveOAuthClient.OAuthUnavailableException.class,
+            CloudreveOAuthClient.OAuthProtocolException.class})
+    ResponseEntity<ProblemDetail> handleCloudreveOAuthFailure(RuntimeException exception, HttpServletRequest request) {
+        return problem(HttpStatus.SERVICE_UNAVAILABLE, "Cloudreve unavailable",
+                "Cloudreve 服务暂时不可用，请稍后重试", request, null);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

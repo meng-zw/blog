@@ -33,13 +33,18 @@ public class CloudreveOAuthTransactionRepository {
     }
 
     public synchronized CloudreveOAuthTransaction consume(String state, long adminId, Instant now) {
+        return consume(state, adminId, null, now);
+    }
+
+    public synchronized CloudreveOAuthTransaction consume(String state, long adminId, String sessionId, Instant now) {
         if (state == null || state.isBlank() || adminId <= 0) throw new CloudreveAuthorizationRequiredException();
         Objects.requireNonNull(now, "Current time is required");
         purgeExpired(now);
         String key = key(state);
         CloudreveOAuthTransaction transaction = transactions.get(key);
         boolean expired = transaction != null && !now.isBefore(transaction.expiresAt());
-        if (transaction == null || transaction.adminId() != adminId || expired) {
+        if (transaction == null || transaction.adminId() != adminId || expired
+                || (transaction.sessionId() != null && !transaction.sessionId().equals(sessionId))) {
             if (expired) transactions.remove(key, transaction);
             throw new CloudreveAuthorizationRequiredException();
         }
