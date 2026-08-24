@@ -1,0 +1,326 @@
+package com.blog.media.storage.cloudreve;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.transaction.TransactionException;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionOperations;
+
+import java.net.URI;
+import java.time.Duration;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.Base64;
+import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class CloudreveTokenServiceTest {
+    private static final Instant NOW = Instant.parse("2026-08-24T00:00:00Z");
+
+    @Test
+    void authorizationStateIsBoundToAdminExpiresAndCanBeConsumedOnlyOnce() {
+        CloudreveOAuthTransactionRepository repository = new CloudreveOAuthTransactionRepository();
+        CloudreveOAuthTransaction transaction = new CloudreveOAuthTransaction(
+                "state", "verifier", 42L, NOW.plusSeconds(60));
+        repository.save(transaction);
+
+        assertThatThrownBy(() -> repository.consume("state", 43L, NOW))
+                .isInstanceOf(CloudreveAuthorizationRequiredException.class);
+        assertThatThrownBy(() -> repository.consume("state", 42L, NOW.plusSeconds(60)))
+                .isInstanceOf(CloudreveAuthorizationRequiredException.class);
+
+        repository.save(transaction);
+        assertThat(repository.consume("state", 42L, NOW).codeVerifier()).isEqualTo("verifier");
+        assertThatThrownBy(() -> repository.consume("state", 42L, NOW))
+                .isInstanceOf(CloudreveAuthorizationRequiredException.class);
+    }
+
+    @Test
+    void transactionToStringDoesNotRevealStateOrVerifier() {
+        CloudreveOAuthTransaction transaction = new CloudreveOAuthTransaction(
+                "state-secret", "verifier-secret", 42L, NOW.plusSeconds(60));
+
+        assertThat(transaction.toString()).doesNotContain("state-secret").doesNotContain("verifier-secret");
+    }
+
+    @Test
+    void failedTokenExchangeStillConsumesStateAndPreventsReplay() {
+        Fixture fixture = new Fixture();
+        when(fixture.oauth.exchangeCode(anyString(), anyString()))
+                .thenThrow(new CloudreveOAuthClient.OAuthUnavailableException("timeout"));
+        URI authorization = fixture.service.beginAuthorization(42L);
+        String state = queryParameter(authorization, "state");
+
+        assertThatThrownBy(() -> fixture.service.completeAuthorization("code", state, 42L))
+                .isInstanceOf(CloudreveOAuthClient.OAuthUnavailableException.class);
+        assertThatThrownBy(() -> fixture.service.completeAuthorization("code", state, 42L))
+                .isInstanceOf(CloudreveAuthorizationRequiredException.class);
+        verify(fixture.oauth, times(1)).exchangeCode(anyString(), anyString());
+    }
+
+    @Test
+    void reauthorizationAtomicallyReplacesOldEncryptedCredentialsAndIdentity() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(600));
+        fixture.stubSuccessfulAuthorization("new-access", "new-refresh");
+        String state = queryParameter(fixture.service.beginAuthorization(42L), "state");
+
+        fixture.service.completeAuthorization("code", state, 42L);
+
+        CloudreveConnection saved = fixture.store.connection.get();
+        assertThat(saved.getStatus()).isEqualTo(CloudreveConnectionStatus.CONNECTED);
+        assertThat(saved.getAuthorizedSubject()).isEqualTo("subject-2");
+        assertThat(saved.getAuthorizedDisplayName()).isEqualTo("New User");
+        assertThat(fixture.decrypt(saved, "access")).isEqualTo("new-access");
+        assertThat(fixture.decrypt(saved, "refresh")).isEqualTo("new-refresh");
+        assertThat(saved.getGrantedScopes()).isEqualTo("Files.Write offline_access openid profile");
+    }
+
+    @Test
+    void blankCallbackCodeConsumesStateWithoutCallingCloudreve() {
+        Fixture fixture = new Fixture();
+        String state = queryParameter(fixture.service.beginAuthorization(42L), "state");
+
+        assertThatThrownBy(() -> fixture.service.completeAuthorization(" ", state, 42L))
+                .isInstanceOf(CloudreveAuthorizationRequiredException.class);
+        assertThatThrownBy(() -> fixture.service.completeAuthorization("code", state, 42L))
+                .isInstanceOf(CloudreveAuthorizationRequiredException.class);
+        verify(fixture.oauth, times(0)).exchangeCode(anyString(), anyString());
+    }
+
+    @Test
+    void returnsUnexpiredAccessTokenWithoutNetwork() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("access", "refresh", NOW.plusSeconds(600), NOW.plusSeconds(1200));
+
+        assertThat(fixture.service.validAccessToken()).isEqualTo("access");
+        verify(fixture.oauth, times(0)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList());
+    }
+
+    @Test
+    void refreshesOutsideTheDatabaseTransactionAndPersistsRotatedPair() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList())).thenAnswer(invocation -> {
+            assertThat(fixture.transactions.active.get()).isFalse();
+            return fixture.pair("new-access", "rotated-refresh");
+        });
+
+        assertThat(fixture.service.validAccessToken()).isEqualTo("new-access");
+
+        CloudreveConnection saved = fixture.store.connection.get();
+        assertThat(fixture.decrypt(saved, "refresh")).isEqualTo("rotated-refresh");
+        assertThat(saved.getStatus()).isEqualTo(CloudreveConnectionStatus.CONNECTED);
+    }
+
+    @Test
+    void onlyOneOfTwoConcurrentCallersUsesTheRefreshToken() throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
+        CountDownLatch refreshStarted = new CountDownLatch(1);
+        CountDownLatch releaseRefresh = new CountDownLatch(1);
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList())).thenAnswer(invocation -> {
+            refreshStarted.countDown();
+            assertThat(releaseRefresh.await(2, TimeUnit.SECONDS)).isTrue();
+            return fixture.pair("new-access", "rotated-refresh");
+        });
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = executor.submit(fixture.service::validAccessToken);
+            assertThat(refreshStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            var second = executor.submit(fixture.service::validAccessToken);
+            releaseRefresh.countDown();
+
+            assertThat(first.get(2, TimeUnit.SECONDS)).isEqualTo("new-access");
+            assertThat(second.get(2, TimeUnit.SECONDS)).isEqualTo("new-access");
+        }
+        verify(fixture.oauth, times(1)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList());
+    }
+
+    @Test
+    void invalidGrantRequiresReauthorizationAndClearsPersistedTokens() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList()))
+                .thenThrow(new CloudreveOAuthClient.InvalidGrantException());
+
+        assertThatThrownBy(fixture.service::validAccessToken)
+                .isInstanceOf(CloudreveAuthorizationRequiredException.class);
+        assertThat(fixture.store.connection.get().getStatus()).isEqualTo(CloudreveConnectionStatus.REAUTH_REQUIRED);
+        assertThat(fixture.store.connection.get().getAccessTokenCiphertext()).isNull();
+        assertThat(fixture.store.connection.get().getRefreshTokenCiphertext()).isNull();
+    }
+
+    @Test
+    void transientRefreshFailureLeavesConnectionRetryable() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList()))
+                .thenThrow(new CloudreveOAuthClient.OAuthUnavailableException("timeout"));
+
+        assertThatThrownBy(fixture.service::validAccessToken)
+                .isInstanceOf(CloudreveOAuthClient.OAuthUnavailableException.class);
+        assertThat(fixture.store.connection.get().getStatus()).isEqualTo(CloudreveConnectionStatus.CONNECTED);
+        assertThat(fixture.decrypt(fixture.store.connection.get(), "refresh")).isEqualTo("old-refresh");
+    }
+
+    @Test
+    void encryptionKeyMismatchFailsClosedAndRequiresReauthorization() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("old-access", "old-refresh", NOW.plusSeconds(600), NOW.plusSeconds(1200));
+        byte[] otherKey = new byte[32];
+        otherKey[0] = 1;
+        CloudreveTokenService wrongKeyService = fixture.serviceWithKey(Base64.getEncoder().encodeToString(otherKey));
+
+        assertThatThrownBy(wrongKeyService::validAccessToken)
+                .isInstanceOf(CloudreveAuthorizationRequiredException.class);
+        assertThat(fixture.store.connection.get().getStatus()).isEqualTo(CloudreveConnectionStatus.REAUTH_REQUIRED);
+    }
+
+    @Test
+    void disconnectClearsCredentialsAndPendingAuthorization() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("access", "refresh", NOW.plusSeconds(600), NOW.plusSeconds(1200));
+        String state = queryParameter(fixture.service.beginAuthorization(42L), "state");
+
+        fixture.service.disconnect(42L);
+
+        assertThat(fixture.store.connection.get().getStatus()).isEqualTo(CloudreveConnectionStatus.DISCONNECTED);
+        assertThat(fixture.store.connection.get().getAccessTokenCiphertext()).isNull();
+        assertThatThrownBy(() -> fixture.transactionsRepository.consume(state, 42L, NOW))
+                .isInstanceOf(CloudreveAuthorizationRequiredException.class);
+    }
+
+    private static String queryParameter(URI uri, String name) {
+        return java.util.Arrays.stream(uri.getRawQuery().split("&"))
+                .map(part -> part.split("=", 2))
+                .filter(pair -> java.net.URLDecoder.decode(pair[0], java.nio.charset.StandardCharsets.UTF_8).equals(name))
+                .map(pair -> java.net.URLDecoder.decode(pair[1], java.nio.charset.StandardCharsets.UTF_8))
+                .findFirst().orElseThrow();
+    }
+
+    private static final class Fixture {
+        private static final String KEY = Base64.getEncoder().encodeToString(new byte[32]);
+        final CloudreveProperties properties = properties();
+        final CloudreveOAuthClient oauth = mock(CloudreveOAuthClient.class);
+        final CloudreveOAuthTransactionRepository transactionsRepository = new CloudreveOAuthTransactionRepository();
+        final FakeTransactions transactions = new FakeTransactions();
+        final FakeConnectionStore store = new FakeConnectionStore(KEY);
+        final CloudreveTokenService service = serviceWithKey(KEY);
+
+        Fixture() {
+            when(oauth.authorizationUri(anyString(), anyString())).thenAnswer(invocation ->
+                    URI.create("https://cloud.example/session/authorize?state="
+                            + java.net.URLEncoder.encode(invocation.getArgument(0), java.nio.charset.StandardCharsets.UTF_8)));
+        }
+
+        CloudreveTokenService serviceWithKey(String key) {
+            return new CloudreveTokenService(properties, store.repository, transactionsRepository, oauth,
+                    new CloudreveTokenCipher(key), transactions, Clock.fixed(NOW, ZoneOffset.UTC));
+        }
+
+        void stubSuccessfulAuthorization(String access, String refresh) {
+            when(oauth.exchangeCode(anyString(), anyString())).thenReturn(pair(access, refresh));
+            when(oauth.userInfo(access)).thenReturn(new CloudreveOAuthClient.UserInfo("subject-2", "New User"));
+        }
+
+        CloudreveOAuthClient.TokenPair pair(String access, String refresh) {
+            return new CloudreveOAuthClient.TokenPair(access, refresh, NOW.plusSeconds(600), NOW.plusSeconds(1200),
+                    List.of("openid", "profile", "offline_access", "Files.Write"));
+        }
+
+        String decrypt(CloudreveConnection connection, String type) {
+            CloudreveTokenCipher cipher = new CloudreveTokenCipher(KEY);
+            byte[] nonce = type.equals("access") ? connection.getAccessTokenNonce() : connection.getRefreshTokenNonce();
+            byte[] ciphertext = type.equals("access") ? connection.getAccessTokenCiphertext() : connection.getRefreshTokenCiphertext();
+            return cipher.decrypt(connection.getId(), type, new CloudreveTokenCipher.EncryptedToken(nonce, ciphertext));
+        }
+
+        private static CloudreveProperties properties() {
+            CloudreveProperties properties = new CloudreveProperties();
+            properties.setBaseUrl(URI.create("https://cloud.example"));
+            properties.setAuthorizationUri(URI.create("https://cloud.example/session/authorize"));
+            properties.setRedirectUri(URI.create("https://blog.example/oauth/callback"));
+            properties.setClientId("client-id");
+            properties.setClientSecret("client-secret");
+            properties.setRequestTimeout(Duration.ofSeconds(2));
+            return properties;
+        }
+    }
+
+    private static final class FakeConnectionStore {
+        final AtomicReference<CloudreveConnection> connection = new AtomicReference<>();
+        final CloudreveConnectionRepository repository = mock(CloudreveConnectionRepository.class);
+        final CloudreveTokenCipher cipher;
+
+        FakeConnectionStore(String key) {
+            cipher = new CloudreveTokenCipher(key);
+            when(repository.findSingletonForUpdate()).thenAnswer(invocation -> Optional.ofNullable(connection.get()));
+            when(repository.findSingleton()).thenAnswer(invocation -> Optional.ofNullable(connection.get()));
+            when(repository.saveAndFlush(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+                CloudreveConnection saved = invocation.getArgument(0);
+                if (saved.getId() == null) saved.setId(1L);
+                setVersion(saved, saved.getVersion() + 1);
+                connection.set(saved);
+                return saved;
+            });
+        }
+
+        void connected(String access, String refresh, Instant accessExpiry, Instant refreshExpiry) {
+            CloudreveConnection value = new CloudreveConnection();
+            value.setId(1L);
+            CloudreveTokenCipher.EncryptedToken encryptedAccess = cipher.encrypt(1L, "access", access);
+            CloudreveTokenCipher.EncryptedToken encryptedRefresh = cipher.encrypt(1L, "refresh", refresh);
+            value.setAccessTokenNonce(encryptedAccess.nonce());
+            value.setAccessTokenCiphertext(encryptedAccess.ciphertext());
+            value.setRefreshTokenNonce(encryptedRefresh.nonce());
+            value.setRefreshTokenCiphertext(encryptedRefresh.ciphertext());
+            value.setAccessTokenExpiresAt(accessExpiry);
+            value.setRefreshTokenExpiresAt(refreshExpiry);
+            value.setGrantedScopes("Files.Write offline_access openid profile");
+            value.setStatus(CloudreveConnectionStatus.CONNECTED);
+            connection.set(value);
+        }
+
+        private static void setVersion(CloudreveConnection connection, long version) {
+            try {
+                var field = CloudreveConnection.class.getDeclaredField("version");
+                field.setAccessible(true);
+                field.setLong(connection, version);
+            } catch (ReflectiveOperationException exception) {
+                throw new AssertionError(exception);
+            }
+        }
+    }
+
+    private static final class FakeTransactions implements TransactionOperations {
+        final ThreadLocal<Boolean> active = ThreadLocal.withInitial(() -> false);
+        private final Object lock = new Object();
+
+        @Override
+        public <T> T execute(TransactionCallback<T> action) throws TransactionException {
+            synchronized (lock) {
+                active.set(true);
+                try {
+                    return action.doInTransaction(new SimpleTransactionStatus());
+                } finally {
+                    active.set(false);
+                }
+            }
+        }
+
+    }
+}
