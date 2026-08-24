@@ -13,8 +13,10 @@ import com.blog.media.storage.ObjectUploadRequest;
 import com.blog.media.storage.StoredObject;
 import com.blog.media.storage.UploadMode;
 import com.blog.media.storage.UploadTicket;
+import com.blog.media.storage.ObjectStorageException;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
+import com.blog.shared.error.ServiceUnavailableException;
 import org.springframework.stereotype.Service;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -25,18 +27,14 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
-import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 /** Owns media upload state transitions while storage adapters only manipulate objects. */
 @Service
 public class MediaApplicationService {
-    private static final Duration PENDING_EXPIRY = Duration.ofHours(24);
 
     private final MediaAssetRepository mediaRepository;
     private final AdminAccountRepository adminAccountRepository;
@@ -44,24 +42,32 @@ public class MediaApplicationService {
     private final MediaContentValidator contentValidator;
     private final MediaReferenceChecker referenceChecker;
     private final MediaProperties properties;
+    private final MediaDeletionService deletionService;
+    private final MediaDeletionTransactionService deletionTransactions;
     private final Clock clock;
 
     public MediaApplicationService(MediaAssetRepository mediaRepository, AdminAccountRepository adminAccountRepository,
                                    ObjectStorageRegistry storageRegistry, MediaContentValidator contentValidator,
-                                   MediaReferenceChecker referenceChecker, MediaProperties properties) {
+                                   MediaReferenceChecker referenceChecker, MediaProperties properties,
+                                   MediaDeletionService deletionService,
+                                   MediaDeletionTransactionService deletionTransactions) {
         this(mediaRepository, adminAccountRepository, storageRegistry, contentValidator, referenceChecker, properties,
-                Clock.systemUTC());
+                deletionService, deletionTransactions, Clock.systemUTC());
     }
 
     MediaApplicationService(MediaAssetRepository mediaRepository, AdminAccountRepository adminAccountRepository,
                             ObjectStorageRegistry storageRegistry, MediaContentValidator contentValidator,
-                            MediaReferenceChecker referenceChecker, MediaProperties properties, Clock clock) {
+                            MediaReferenceChecker referenceChecker, MediaProperties properties,
+                            MediaDeletionService deletionService,
+                            MediaDeletionTransactionService deletionTransactions, Clock clock) {
         this.mediaRepository = mediaRepository;
         this.adminAccountRepository = adminAccountRepository;
         this.storageRegistry = storageRegistry;
         this.contentValidator = contentValidator;
         this.referenceChecker = referenceChecker;
         this.properties = properties;
+        this.deletionService = deletionService;
+        this.deletionTransactions = deletionTransactions;
         this.clock = clock;
     }
 
@@ -141,46 +147,37 @@ public class MediaApplicationService {
             asset.setUpdatedAt(now);
             mediaRepository.save(asset);
             return response(asset);
-        } catch (IOException exception) {
-            failUpload(asset, storage);
-            throw new IllegalArgumentException("Unable to read stored media", exception);
-        } catch (RuntimeException exception) {
+        } catch (ObjectStorageException | IOException exception) {
+            throw new ServiceUnavailableException("媒体存储暂时不可用，请稍后重试", exception);
+        } catch (IllegalArgumentException exception) {
             failUpload(asset, storage);
             throw new IllegalArgumentException("Unable to verify stored media", exception);
+        } catch (RuntimeException exception) {
+            // Unknown provider failures are safer to retry than to destroy an otherwise valid upload.
+            throw new ServiceUnavailableException("媒体存储暂时不可用，请稍后重试", exception);
         }
     }
 
-    @Transactional
     public void delete(long mediaId, String username) {
-        MediaAsset asset = ownedAssetForDeletion(mediaId, username);
-        if (asset.getStatus() == MediaStatus.DELETED) {
-            return;
-        }
-        if (asset.getStatus() != MediaStatus.READY) {
-            throw new ConflictException("Only ready media can be deleted");
-        }
-        if (referenceChecker.isReferenced(mediaId)) {
-            throw new ConflictException("Media asset is referenced and cannot be deleted");
-        }
-        try {
-            storage(asset).delete(location(asset));
-        } catch (IOException exception) {
-            throw new IllegalArgumentException("Unable to delete media object", exception);
-        }
-        asset.setStatus(MediaStatus.DELETED);
-        asset.setUpdatedAt(clock.instant());
-        mediaRepository.save(asset);
+        deletionService.deleteOwned(mediaId, username);
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<AdminMediaAssetResponse> list(int page, int size, MediaStatus status, MediaPurpose purpose) {
+    public PageResponse<AdminMediaAssetResponse> list(int page, int size, MediaStatus status, MediaPurpose purpose,
+                                                      String username) {
         if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("Page size must be between 1 and 100");
+        AdminAccount administrator = currentAdministrator(username);
         var assets = mediaRepository.findAdminPage(status, purpose,
                 PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"))));
         var referencedIds = referenceChecker.referencedIds(assets.getContent().stream().map(MediaAsset::getId).toList());
-        return PageResponse.from(assets.map(asset -> new AdminMediaAssetResponse(asset.getId(), asset.getOriginalFilename(), asset.getContentType(),
+        return PageResponse.from(assets.map(asset -> {
+            boolean referenced = referencedIds.contains(asset.getId());
+            boolean deletableStatus = asset.getStatus() == MediaStatus.READY || asset.getStatus() == MediaStatus.DELETING;
+            return new AdminMediaAssetResponse(asset.getId(), asset.getOriginalFilename(), asset.getContentType(),
                         asset.getByteSize(), asset.getWidth(), asset.getHeight(), asset.getProvider(), asset.getStatus(),
-                        asset.getPurpose(), referencedIds.contains(asset.getId()), stableUrl(asset), asset.getCreatedAt())));
+                        asset.getPurpose(), referenced, deletableStatus && !referenced
+                        && deletionTransactions.ownsForDeletion(asset, administrator), stableUrl(asset), asset.getCreatedAt());
+        }));
     }
 
     @Transactional(readOnly = true)
@@ -205,27 +202,8 @@ public class MediaApplicationService {
         }
     }
 
-    @Transactional
     public int abandonExpiredUploads() {
-        Instant expiredBefore = clock.instant().minus(PENDING_EXPIRY);
-        int cleaned = 0;
-        List<MediaAsset> retryableAssets = mediaRepository.findByStatusIn(List.of(MediaStatus.ABANDONED, MediaStatus.FAILED));
-        for (MediaAsset asset : mediaRepository.findByStatusAndCreatedAtBefore(MediaStatus.PENDING_UPLOAD, expiredBefore)) {
-            asset.setStatus(deleteObjectBestEffort(asset) ? MediaStatus.DELETED : MediaStatus.ABANDONED);
-            asset.setUpdatedAt(clock.instant());
-            mediaRepository.save(asset);
-            cleaned++;
-        }
-        for (MediaAsset asset : retryableAssets) {
-            if ((asset.getStatus() == MediaStatus.ABANDONED || asset.getStatus() == MediaStatus.FAILED)
-                    && deleteObjectBestEffort(asset)) {
-                asset.setStatus(MediaStatus.DELETED);
-                asset.setUpdatedAt(clock.instant());
-                mediaRepository.save(asset);
-            }
-            cleaned++;
-        }
-        return cleaned;
+        return deletionService.cleanupBatch();
     }
 
     private UploadTicket directTicket(ObjectStorage storage, ObjectLocation location, ObjectUploadRequest request) {
@@ -262,25 +240,9 @@ public class MediaApplicationService {
         mediaRepository.save(asset);
     }
 
-    private boolean deleteObjectBestEffort(MediaAsset asset) {
-        try {
-            storage(asset).delete(location(asset));
-            return true;
-        } catch (IOException | RuntimeException ignored) {
-            // ABANDONED and FAILED remain eligible for the next cleanup run until their provider delete succeeds.
-            return false;
-        }
-    }
-
     private MediaAsset ownedAsset(long mediaId, String username) {
         AdminAccount administrator = currentAdministrator(username);
         return mediaRepository.findByIdAndUploadedById(mediaId, administrator.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Media asset", Long.toString(mediaId)));
-    }
-
-    private MediaAsset ownedAssetForDeletion(long mediaId, String username) {
-        AdminAccount administrator = currentAdministrator(username);
-        return mediaRepository.lockById(mediaId).filter(asset -> administrator.getId().equals(asset.getUploadedById()))
                 .orElseThrow(() -> new ResourceNotFoundException("Media asset", Long.toString(mediaId)));
     }
 

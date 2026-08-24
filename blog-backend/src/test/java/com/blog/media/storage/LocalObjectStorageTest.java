@@ -2,7 +2,6 @@ package com.blog.media.storage;
 
 import com.blog.media.MediaProperties;
 import com.blog.media.StorageProvider;
-import com.blog.shared.error.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -98,8 +97,9 @@ class LocalObjectStorageTest {
         String key = "avatars/" + UUID.randomUUID() + ".png";
 
         assertThatThrownBy(() -> storage.inspect(location(key)))
-                .isInstanceOf(ResourceNotFoundException.class)
-                .hasMessageContaining(key);
+                .isInstanceOf(ObjectStorageException.class)
+                .satisfies(error -> assertThat(((ObjectStorageException) error).kind())
+                        .isEqualTo(ObjectStorageException.Kind.NOT_FOUND));
     }
 
     @Test

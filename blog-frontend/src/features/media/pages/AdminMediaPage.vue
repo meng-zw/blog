@@ -14,7 +14,7 @@
         <div v-else class="media-file" aria-hidden="true">文件</div>
         <strong>{{ media.filename }}</strong><small>{{ media.contentType }} · {{ formatSize(media.byteSize) }}</small>
         <p><span class="badge">{{ media.provider }}</span><span class="badge">{{ media.status }}</span><span class="badge">{{ media.purpose }}</span><span class="badge" :class="media.referenced ? 'badge--used' : 'badge--unused'">{{ media.referenced ? '已使用' : '未使用' }}</span></p>
-        <button v-if="!media.referenced && media.status === 'READY'" type="button" class="danger" :disabled="deleting === media.mediaId" @click="remove(media.mediaId)">删除</button>
+        <button v-if="media.canDelete" type="button" class="danger" :disabled="deleting === media.mediaId" @click="remove(media.mediaId)">{{ media.status === 'DELETING' ? '重试删除' : '删除' }}</button>
         <small v-else>已被引用或未完成的资源不可删除</small>
       </article>
     </div>
@@ -28,7 +28,7 @@ import type { AdminMediaAssetResponse, MediaPurpose, MediaStatus } from '../../.
 import { ACCEPTED_IMAGE_TYPES, deleteMedia, imageFileHint, listMedia } from '../api'
 import { uploadMedia } from '../uploader'
 const assets=ref<AdminMediaAssetResponse[]>([]),loading=ref(false),uploading=ref(false),progress=ref(0),deleting=ref<number|null>(null),errorMessage=ref(''),status=ref<MediaStatus|''>(''),purpose=ref<MediaPurpose|''>(''),page=ref(0),total=ref(0),totalPages=ref(0)
-const statuses:MediaStatus[]=['PENDING_UPLOAD','READY','FAILED','ABANDONED','DELETED'];const purposes:MediaPurpose[]=['AVATAR','ARTICLE_COVER','TOPIC_COVER','TOOL_COVER','INLINE_IMAGE','ATTACHMENT']
+const statuses:MediaStatus[]=['PENDING_UPLOAD','READY','DELETING','FAILED','ABANDONED','DELETED'];const purposes:MediaPurpose[]=['AVATAR','ARTICLE_COVER','TOPIC_COVER','TOOL_COVER','INLINE_IMAGE','ATTACHMENT']
 async function load(){loading.value=true;errorMessage.value='';try{const result=await listMedia(page.value,24,status.value||undefined,purpose.value||undefined);assets.value=result.items;page.value=result.page;total.value=result.total;totalPages.value=result.totalPages}catch(e){errorMessage.value=e instanceof Error?e.message:'媒体库读取失败'}finally{loading.value=false}}
 function resetAndLoad(){page.value=0;void load()}
 function go(value:number){if(value<0||value>=totalPages.value||value===page.value)return;page.value=value;void load()}

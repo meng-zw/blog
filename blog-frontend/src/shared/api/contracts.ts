@@ -55,7 +55,7 @@ export interface UpdateSiteProfileRequest {
 
 export type MediaPurpose = 'AVATAR' | 'ARTICLE_COVER' | 'TOPIC_COVER' | 'TOOL_COVER' | 'INLINE_IMAGE' | 'ATTACHMENT'
 export type MediaUploadMode = 'DIRECT' | 'PROXY'
-export type MediaStatus = 'PENDING_UPLOAD' | 'READY' | 'FAILED' | 'ABANDONED' | 'DELETED'
+export type MediaStatus = 'PENDING_UPLOAD' | 'READY' | 'DELETING' | 'FAILED' | 'ABANDONED' | 'DELETED'
 
 export interface MediaUploadPlanResponse {
   mediaId: number
@@ -81,6 +81,7 @@ export interface MediaAssetResponse {
 export interface AdminMediaAssetResponse extends MediaAssetResponse {
   provider: 'LOCAL' | 'R2'
   referenced: boolean
+  canDelete: boolean
   createdAt: IsoDateTime
 }
 

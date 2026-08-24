@@ -1,5 +1,6 @@
 package com.blog.media;
 
+import com.blog.media.storage.ObjectStorageException;
 import org.springframework.stereotype.Component;
 
 import javax.imageio.ImageIO;
@@ -174,7 +175,7 @@ public class MediaContentValidator {
             }
             return output.toByteArray();
         } catch (IOException exception) {
-            throw new IllegalArgumentException("Unable to read stored media content", exception);
+            throw ObjectStorageException.transientFailure("Unable to read stored media content", exception);
         }
     }
 

@@ -16,6 +16,7 @@ import java.util.zip.CRC32;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -205,6 +206,7 @@ class MediaStorageServiceTest {
         MediaAssetRepository repository = mock(MediaAssetRepository.class);
         String key = "123e4567-e89b-12d3-a456-426614174000.png";
         MediaAsset local = mediaAsset(StorageProvider.LOCAL, "", key);
+        local.setStatus(MediaStatus.READY);
         MediaAsset r2 = mediaAsset(StorageProvider.R2, "blog-media", key);
         when(repository.findByStorageKey(key)).thenReturn(Optional.of(r2));
         when(repository.findByProviderAndBucketAndStorageKey(StorageProvider.LOCAL, "", key))
@@ -215,6 +217,19 @@ class MediaStorageServiceTest {
 
         verify(repository).findByProviderAndBucketAndStorageKey(StorageProvider.LOCAL, "", key);
         verify(repository, never()).findByStorageKey(key);
+    }
+
+    @Test
+    void legacyPublicLookupRejectsMediaThatIsNotReady() {
+        MediaAssetRepository repository = mock(MediaAssetRepository.class);
+        String key = "123e4567-e89b-12d3-a456-426614174000.png";
+        MediaAsset deleting = mediaAsset(StorageProvider.LOCAL, "", key);
+        deleting.setStatus(MediaStatus.DELETING);
+        when(repository.findByProviderAndBucketAndStorageKey(StorageProvider.LOCAL, "", key))
+                .thenReturn(Optional.of(deleting));
+
+        assertThatThrownBy(() -> new MediaStorageService(repository, properties()).findByStorageKey(key))
+                .isInstanceOf(com.blog.shared.error.ResourceNotFoundException.class);
     }
 
     private MediaProperties properties() {

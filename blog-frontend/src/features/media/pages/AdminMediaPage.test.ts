@@ -9,7 +9,7 @@ vi.mock('../uploader', () => ({ uploadMedia: vi.fn() }))
 
 const asset: any = { mediaId: 12, filename: 'asset.png', contentType: 'image/png', byteSize: 1024,
   width: 1200, height: 800, provider: 'R2', status: 'READY', purpose: 'INLINE_IMAGE', referenced: false,
-  url: '/api/media/assets/12', createdAt: '2026-08-24T00:00:00Z' }
+  canDelete: true, url: '/api/media/assets/12', createdAt: '2026-08-24T00:00:00Z' }
 const page = { items: [asset], page: 0, size: 24, total: 49, totalPages: 3 }
 
 describe('admin media page', () => {
@@ -19,6 +19,11 @@ describe('admin media page', () => {
     expect(wrapper.text()).toContain('R2'); expect(wrapper.text()).toContain('INLINE_IMAGE'); expect(wrapper.text()).toContain('未使用')
     expect(wrapper.get('img').attributes('src')).toBe('/api/media/assets/12')
     await wrapper.get('button.danger').trigger('click'); expect(deleteMedia).toHaveBeenCalledWith(12)
+  })
+  it('uses the server deletion decision instead of inferring it from status and references', async () => {
+    vi.mocked(listMedia).mockResolvedValue({ ...page, items: [{ ...asset, canDelete: false }] })
+    const wrapper = mount(AdminMediaPage); await flushPromises()
+    expect(wrapper.find('button.danger').exists()).toBe(false)
   })
   it('uploads images through shared uploader then refreshes library', async () => {
     vi.mocked(uploadMedia).mockResolvedValue(page.items[0]); const wrapper = mount(AdminMediaPage); await flushPromises()

@@ -10,7 +10,8 @@ import com.blog.media.storage.ObjectStorageRegistry;
 import com.blog.media.storage.StoredObject;
 import com.blog.media.storage.UploadMode;
 import com.blog.media.storage.UploadTicket;
-import com.blog.shared.error.ResourceNotFoundException;
+import com.blog.media.storage.ObjectStorageException;
+import com.blog.shared.error.ServiceUnavailableException;
 import org.junit.jupiter.api.Test;
 
 import javax.imageio.ImageIO;
@@ -120,17 +121,75 @@ class MediaApplicationServiceTest {
     }
 
     @Test
-    void recordsFailedStateWhenStoredObjectIsMissing() throws Exception {
+    void keepsPendingUploadRetryableWhenStorageInspectionIsTransientThenCompletesLater() throws Exception {
+        Fixture fixture = fixture(StorageProvider.R2, true);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        asset.setProvider(StorageProvider.R2);
+        asset.setBucket("blog-media");
+        when(fixture.mediaRepository.findByIdAndUploadedById(42L, 7L)).thenReturn(Optional.of(asset));
+        byte[] bytes = png();
+        when(fixture.storage.inspect(location(asset)))
+                .thenThrow(ObjectStorageException.transientFailure("R2 HEAD timed out", new IOException("timeout")))
+                .thenReturn(new StoredObject(asset.getStorageKey(), "image/png", bytes.length, "etag-1"));
+        when(fixture.storage.openStream(location(asset))).thenReturn(new ByteArrayInputStream(bytes));
+
+        assertThatThrownBy(() -> fixture.service.complete(42L, "owner"))
+                .isInstanceOf(ServiceUnavailableException.class);
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.PENDING_UPLOAD);
+        verify(fixture.storage, never()).delete(any());
+
+        assertThat(fixture.service.complete(42L, "owner").status()).isEqualTo(MediaStatus.READY);
+    }
+
+    @Test
+    void keepsPendingUploadRetryableWhenStoredContentStreamFails() throws Exception {
+        Fixture fixture = fixture(StorageProvider.R2, true);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        asset.setProvider(StorageProvider.R2);
+        asset.setBucket("blog-media");
+        when(fixture.mediaRepository.findByIdAndUploadedById(42L, 7L)).thenReturn(Optional.of(asset));
+        when(fixture.storage.inspect(location(asset))).thenReturn(
+                new StoredObject(asset.getStorageKey(), "image/png", asset.getByteSize(), "etag-1"));
+        when(fixture.storage.openStream(location(asset))).thenThrow(new IOException("GET timed out"));
+
+        assertThatThrownBy(() -> fixture.service.complete(42L, "owner"))
+                .isInstanceOf(ServiceUnavailableException.class);
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.PENDING_UPLOAD);
+        verify(fixture.storage, never()).delete(any());
+    }
+
+    @Test
+    void keepsPendingUploadRetryableWhenNetworkStreamFailsDuringValidationRead() throws Exception {
+        Fixture fixture = fixture(StorageProvider.R2, true);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        asset.setProvider(StorageProvider.R2);
+        asset.setBucket("blog-media");
+        when(fixture.mediaRepository.findByIdAndUploadedById(42L, 7L)).thenReturn(Optional.of(asset));
+        when(fixture.storage.inspect(location(asset))).thenReturn(
+                new StoredObject(asset.getStorageKey(), "image/png", asset.getByteSize(), "etag-1"));
+        when(fixture.storage.openStream(location(asset))).thenReturn(new java.io.InputStream() {
+            @Override public int read() throws IOException { throw new IOException("socket reset"); }
+        });
+
+        assertThatThrownBy(() -> fixture.service.complete(42L, "owner"))
+                .isInstanceOf(ServiceUnavailableException.class);
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.PENDING_UPLOAD);
+        verify(fixture.storage, never()).delete(any());
+    }
+
+    @Test
+    void keepsPendingStateWhenStoredObjectIsNotYetVisible() throws Exception {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
         MediaAsset asset = pendingAsset(42L, 7L);
         when(fixture.mediaRepository.findByIdAndUploadedById(42L, 7L)).thenReturn(Optional.of(asset));
         when(fixture.storage.inspect(location(asset)))
-                .thenThrow(new ResourceNotFoundException("Media object", asset.getStorageKey()));
+                .thenThrow(ObjectStorageException.notFound("Media object not found", null));
 
-        assertThatIllegalArgumentException().isThrownBy(() -> fixture.service.complete(42L, "owner"));
+        assertThatThrownBy(() -> fixture.service.complete(42L, "owner"))
+                .isInstanceOf(ServiceUnavailableException.class);
 
-        assertThat(asset.getStatus()).isEqualTo(MediaStatus.DELETED);
-        verify(fixture.mediaRepository).save(asset);
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.PENDING_UPLOAD);
+        verify(fixture.storage, never()).delete(any());
     }
 
     @Test
@@ -188,7 +247,8 @@ class MediaApplicationServiceTest {
         when(r2.resolvePublicUrl(persisted)).thenReturn(URI.create("https://archive.example/asset.png"));
         MediaApplicationService service = new MediaApplicationService(mediaRepository,
                 mock(AdminAccountRepository.class), registry, new MediaContentValidator(properties),
-                mock(MediaReferenceChecker.class), properties, Clock.fixed(NOW, ZoneOffset.UTC));
+                mock(MediaReferenceChecker.class), properties, mock(MediaDeletionService.class),
+                mock(MediaDeletionTransactionService.class), Clock.fixed(NOW, ZoneOffset.UTC));
 
         assertThat(service.resolvePublic(42L).location()).hasToString("https://archive.example/asset.png");
         verify(r2).resolvePublicUrl(persisted);
@@ -220,72 +280,41 @@ class MediaApplicationServiceTest {
     @Test
     void marksExpiredPendingUploadTerminalAfterRemovingItsObject() throws Exception {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
-        MediaAsset asset = pendingAsset(42L, 7L);
-        asset.setCreatedAt(NOW.minusSeconds(24 * 60 * 60 + 1));
-        when(fixture.mediaRepository.findByStatusAndCreatedAtBefore(eq(MediaStatus.PENDING_UPLOAD), any()))
-                .thenReturn(java.util.List.of(asset));
+        when(fixture.deletionService.cleanupBatch()).thenReturn(1);
 
         assertThat(fixture.service.abandonExpiredUploads()).isEqualTo(1);
-
-        assertThat(asset.getStatus()).isEqualTo(MediaStatus.DELETED);
-        verify(fixture.storage).delete(location(asset));
+        verify(fixture.deletionService).cleanupBatch();
     }
 
     @Test
     void retriesFailedDeletionForAbandonedUploadWithoutTouchingReadyMedia() throws Exception {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
-        MediaAsset abandoned = pendingAsset(42L, 7L);
-        abandoned.setCreatedAt(NOW.minusSeconds(24 * 60 * 60 + 1));
-        MediaAsset ready = pendingAsset(43L, 7L);
-        ready.setStorageKey("inline-images/123e4567-e89b-12d3-a456-426614174001.png");
-        ready.setStatus(MediaStatus.READY);
-        when(fixture.mediaRepository.findByStatusAndCreatedAtBefore(eq(MediaStatus.PENDING_UPLOAD), any()))
-                .thenReturn(java.util.List.of(abandoned), java.util.List.of());
-        when(fixture.mediaRepository.findByStatusIn(java.util.List.of(MediaStatus.ABANDONED, MediaStatus.FAILED)))
-                .thenReturn(java.util.List.of(), java.util.List.of(abandoned));
-        org.mockito.Mockito.doThrow(new IOException("offline")).doNothing()
-                .when(fixture.storage).delete(location(abandoned));
-
-        fixture.service.abandonExpiredUploads();
-        assertThat(abandoned.getStatus()).isEqualTo(MediaStatus.ABANDONED);
-        fixture.service.abandonExpiredUploads();
-        assertThat(abandoned.getStatus()).isEqualTo(MediaStatus.DELETED);
-        fixture.service.abandonExpiredUploads();
-
-        assertThat(ready.getStatus()).isEqualTo(MediaStatus.READY);
-        verify(fixture.storage, org.mockito.Mockito.times(2)).delete(location(abandoned));
-        verify(fixture.storage, never()).delete(location(ready));
+        when(fixture.deletionService.cleanupBatch()).thenReturn(0, 1, 0);
+        assertThat(fixture.service.abandonExpiredUploads()).isZero();
+        assertThat(fixture.service.abandonExpiredUploads()).isEqualTo(1);
+        assertThat(fixture.service.abandonExpiredUploads()).isZero();
+        verify(fixture.deletionService, org.mockito.Mockito.times(3)).cleanupBatch();
     }
 
     @Test
     void marksFailedValidationCleanupTerminalAfterObjectDeletion() throws Exception {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
-        MediaAsset failed = pendingAsset(42L, 7L);
-        failed.setStatus(MediaStatus.FAILED);
-        when(fixture.mediaRepository.findByStatusAndCreatedAtBefore(eq(MediaStatus.PENDING_UPLOAD), any()))
-                .thenReturn(java.util.List.of());
-        when(fixture.mediaRepository.findByStatusIn(java.util.List.of(MediaStatus.ABANDONED, MediaStatus.FAILED)))
-                .thenReturn(java.util.List.of(failed));
+        when(fixture.deletionService.cleanupBatch()).thenReturn(1);
 
         assertThat(fixture.service.abandonExpiredUploads()).isEqualTo(1);
-
-        assertThat(failed.getStatus()).isEqualTo(MediaStatus.DELETED);
-        verify(fixture.storage).delete(location(failed));
     }
 
     @Test
     void refusesDeletionWhenAnyLegacyReferenceUsesTheMedia() throws Exception {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
-        MediaAsset asset = pendingAsset(42L, 7L);
-        asset.setStatus(MediaStatus.READY);
-        when(fixture.mediaRepository.lockById(42L)).thenReturn(Optional.of(asset));
-        when(fixture.referenceChecker.isReferenced(42L)).thenReturn(true);
+        org.mockito.Mockito.doThrow(new com.blog.shared.error.ConflictException("Media asset is referenced"))
+                .when(fixture.deletionService).deleteOwned(42L, "owner");
 
         assertThatThrownBy(() -> fixture.service.delete(42L, "owner"))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("referenced");
 
-        verify(fixture.storage, never()).delete(any());
+        verify(fixture.deletionService).deleteOwned(42L, "owner");
     }
 
     @Test
@@ -297,9 +326,13 @@ class MediaApplicationServiceTest {
                 new org.springframework.data.domain.PageImpl<>(List.of(first, second)));
         when(fixture.referenceChecker.referencedIds(List.of(1L, 2L))).thenReturn(Set.of(2L));
 
-        var page = fixture.service.list(0, 24, null, null);
+        when(fixture.deletionTransactions.ownsForDeletion(eq(first), any())).thenReturn(true);
+        when(fixture.deletionTransactions.ownsForDeletion(eq(second), any())).thenReturn(true);
+
+        var page = fixture.service.list(0, 24, null, null, "owner");
 
         assertThat(page.items()).extracting(item -> item.referenced()).containsExactly(false, true);
+        assertThat(page.items()).extracting(item -> item.canDelete()).containsExactly(true, false);
         verify(fixture.referenceChecker).referencedIds(List.of(1L, 2L));
         verify(fixture.referenceChecker, never()).isReferenced(any(Long.class));
     }
@@ -310,6 +343,8 @@ class MediaApplicationServiceTest {
         ObjectStorageRegistry registry = mock(ObjectStorageRegistry.class);
         ObjectStorage storage = mock(ObjectStorage.class);
         MediaReferenceChecker referenceChecker = mock(MediaReferenceChecker.class);
+        MediaDeletionTransactionService deletionTransactions = mock(MediaDeletionTransactionService.class);
+        MediaDeletionService deletionService = mock(MediaDeletionService.class);
         MediaProperties properties = new MediaProperties();
         properties.setProvider(provider);
         when(registry.get(provider)).thenReturn(storage);
@@ -334,8 +369,9 @@ class MediaApplicationServiceTest {
             return candidate;
         });
         MediaApplicationService service = new MediaApplicationService(mediaRepository, adminRepository, registry,
-                new MediaContentValidator(properties), referenceChecker, properties, Clock.fixed(NOW, ZoneOffset.UTC));
-        return new Fixture(service, mediaRepository, storage, referenceChecker, saved);
+                new MediaContentValidator(properties), referenceChecker, properties, deletionService,
+                deletionTransactions, Clock.fixed(NOW, ZoneOffset.UTC));
+        return new Fixture(service, mediaRepository, storage, referenceChecker, saved, deletionTransactions, deletionService);
     }
 
     private static MediaAsset pendingAsset(long id, long ownerId) {
@@ -386,6 +422,7 @@ class MediaApplicationServiceTest {
     }
 
     private record Fixture(MediaApplicationService service, MediaAssetRepository mediaRepository, ObjectStorage storage,
-                           MediaReferenceChecker referenceChecker, MediaAsset saved) {
+                           MediaReferenceChecker referenceChecker, MediaAsset saved,
+                           MediaDeletionTransactionService deletionTransactions, MediaDeletionService deletionService) {
     }
 }

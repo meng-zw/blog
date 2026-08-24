@@ -10,14 +10,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.jpa.repository.Lock;
 import jakarta.persistence.LockModeType;
+import org.springframework.data.repository.query.Param;
 
 public interface MediaAssetRepository extends JpaRepository<MediaAsset, Long> {
     Optional<MediaAsset> findByStorageKey(String storageKey);
     Optional<MediaAsset> findByProviderAndBucketAndStorageKey(StorageProvider provider, String bucket, String storageKey);
     Optional<MediaAsset> findByIdAndUploadedById(Long id, Long uploadedById);
-    List<MediaAsset> findByStatusAndCreatedAtBefore(MediaStatus status, Instant createdAt);
-    List<MediaAsset> findByStatusIn(List<MediaStatus> statuses);
-
     @Query("select media from MediaAsset media where (:status is null or media.status = :status) " +
             "and (:purpose is null or media.purpose = :purpose)")
     Page<MediaAsset> findAdminPage(MediaStatus status, MediaPurpose purpose, Pageable pageable);
@@ -25,4 +23,12 @@ public interface MediaAssetRepository extends JpaRepository<MediaAsset, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select media from MediaAsset media where media.id = :id")
     Optional<MediaAsset> lockById(Long id);
+
+    @Query("select media.id from MediaAsset media where " +
+            "(media.status = :pendingStatus and media.createdAt < :expiredBefore) " +
+            "or media.status in :retryStatuses order by media.updatedAt, media.id")
+    List<Long> findCleanupCandidateIds(@Param("pendingStatus") MediaStatus pendingStatus,
+                                       @Param("expiredBefore") Instant expiredBefore,
+                                       @Param("retryStatuses") List<MediaStatus> retryStatuses,
+                                       Pageable pageable);
 }

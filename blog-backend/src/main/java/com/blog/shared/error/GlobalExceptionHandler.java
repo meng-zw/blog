@@ -1,5 +1,6 @@
 package com.blog.shared.error;
 
+import com.blog.media.storage.ObjectStorageException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.MDC;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -39,6 +40,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(TooManyRequestsException.class)
     ResponseEntity<ProblemDetail> handleTooManyRequests(TooManyRequestsException exception, HttpServletRequest request) {
         return problem(HttpStatus.TOO_MANY_REQUESTS, "Too many requests", exception.getMessage(), request, null);
+    }
+
+    @ExceptionHandler(ServiceUnavailableException.class)
+    ResponseEntity<ProblemDetail> handleServiceUnavailable(ServiceUnavailableException exception, HttpServletRequest request) {
+        return problem(HttpStatus.SERVICE_UNAVAILABLE, "Service unavailable", exception.getMessage(), request, null);
+    }
+
+    @ExceptionHandler(ObjectStorageException.class)
+    ResponseEntity<ProblemDetail> handleObjectStorage(ObjectStorageException exception, HttpServletRequest request) {
+        HttpStatus status = exception.kind() == ObjectStorageException.Kind.NOT_FOUND
+                ? HttpStatus.NOT_FOUND : HttpStatus.SERVICE_UNAVAILABLE;
+        return problem(status, status == HttpStatus.NOT_FOUND ? "Resource not found" : "Service unavailable",
+                exception.getMessage(), request, null);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -16,14 +16,33 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
     @Autowired DataSource dataSource;
 
     @Test
-    void migratesAnEmptyDatabaseToVersionTen() {
+    void migratesAnEmptyDatabaseToVersionEleven() {
         var flyway = Flyway.configure().dataSource(dataSource).load();
         assertThat(flyway.info().current()).isNull();
 
         var result = flyway.migrate();
         assertThat(result.success).isTrue();
-        assertThat(result.migrationsExecuted).isEqualTo(10);
-        assertThat(result.targetSchemaVersion).isEqualTo("10");
+        assertThat(result.migrationsExecuted).isEqualTo(11);
+        assertThat(result.targetSchemaVersion).isEqualTo("11");
+    }
+
+    @Test
+    void supportsDurableDeletingStateAndItsRetryIndex() {
+        var flyway = Flyway.configure().dataSource(dataSource).load();
+        assertThat(flyway.migrate().success).isTrue();
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        jdbc.update("""
+                INSERT INTO media_asset
+                    (provider, bucket, storage_key, status, purpose, original_filename, content_type, byte_size,
+                     created_at, updated_at)
+                VALUES ('LOCAL', '', 'inline-images/deleting.png', 'DELETING', 'INLINE_IMAGE',
+                        'deleting.png', 'image/png', 42, CURRENT_TIMESTAMP(6), CURRENT_TIMESTAMP(6))
+                """);
+
+        assertThat(jdbc.queryForObject("SELECT status FROM media_asset WHERE storage_key = ?", String.class,
+                "inline-images/deleting.png")).isEqualTo("DELETING");
+        assertThat(jdbc.queryForList("SHOW INDEX FROM media_asset WHERE Key_name = 'idx_media_asset_status_id'"))
+                .isNotEmpty();
     }
 
     @Test
@@ -75,7 +94,7 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
         var result = Flyway.configure().dataSource(dataSource).load().migrate();
 
         assertThat(result.success).isTrue();
-        assertThat(result.migrationsExecuted).isEqualTo(1);
+        assertThat(result.migrationsExecuted).isEqualTo(3);
         var migrated = jdbc.queryForMap("""
                 SELECT provider, bucket, status, purpose
                 FROM media_asset

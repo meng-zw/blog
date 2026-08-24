@@ -6,7 +6,7 @@ import com.blog.media.storage.ObjectLocation;
 import com.blog.media.storage.StoredObject;
 import com.blog.media.storage.UploadMode;
 import com.blog.media.storage.UploadTicket;
-import com.blog.shared.error.ResourceNotFoundException;
+import com.blog.media.storage.ObjectStorageException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import software.amazon.awssdk.core.ResponseInputStream;
@@ -89,8 +89,21 @@ class R2ObjectStorageTest {
 
         when(client.headObject(any(HeadObjectRequest.class))).thenThrow(NoSuchKeyException.builder().message("gone").build());
         assertThatThrownBy(() -> storage.inspect(location("inline-images/missing.png")))
-                .isInstanceOf(ResourceNotFoundException.class)
-                .hasMessageContaining("inline-images/missing.png");
+                .isInstanceOf(ObjectStorageException.class)
+                .extracting(error -> ((ObjectStorageException) error).kind())
+                .isEqualTo(ObjectStorageException.Kind.NOT_FOUND);
+    }
+
+    @Test
+    void classifiesR2ServerFailuresAsTransientStorageFailures() {
+        S3Client client = mock(S3Client.class);
+        when(client.headObject(any(HeadObjectRequest.class)))
+                .thenThrow(S3Exception.builder().statusCode(503).message("unavailable").build());
+
+        assertThatThrownBy(() -> storage(client, mock(S3Presigner.class)).inspect(location("inline-images/a.png")))
+                .isInstanceOf(ObjectStorageException.class)
+                .extracting(error -> ((ObjectStorageException) error).kind())
+                .isEqualTo(ObjectStorageException.Kind.TRANSIENT);
     }
 
     @Test

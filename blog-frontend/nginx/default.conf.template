@@ -4,6 +4,8 @@ server {
     server_tokens off;
     root /usr/share/nginx/html;
     index index.html;
+    # Backend accepts uploads up to 51 MiB; leave multipart/proxy framing headroom.
+    client_max_body_size 64m;
     include /etc/nginx/snippets/security-headers.conf;
     add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: ${MEDIA_PUBLIC_ORIGINS}; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ${MEDIA_UPLOAD_ORIGIN}; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'" always;
     gzip on;

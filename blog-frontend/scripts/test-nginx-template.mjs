@@ -19,6 +19,9 @@ for (const variable of ['$uri', '$host', '$remote_addr', '$scheme', '$server_por
 }
 if (rendered.includes('${BACKEND_')) throw new Error('Backend placeholders remain after rendering')
 if (!rendered.includes('proxy_pass http://api:8081')) throw new Error('Backend target was not rendered')
+if (!/^\s*client_max_body_size\s+64m;\s*$/m.test(rendered)) {
+  throw new Error('Nginx must accept the backend maximum media request size with overhead')
+}
 if (!rendered.includes("connect-src 'self' https://account.r2.cloudflarestorage.com")) {
   throw new Error('R2 upload origin is missing from the rendered connect-src policy')
 }

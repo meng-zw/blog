@@ -80,6 +80,18 @@ class ArticleMediaReferenceServiceTest {
     }
 
     @Test
+    void rejectsMediaThatHasEnteredDeletingWhileAnArticleWaitedForTheRowLock() {
+        MediaAsset deleting = readyMedia(12L, MediaPurpose.INLINE_IMAGE, "diagram.png");
+        deleting.setStatus(MediaStatus.DELETING);
+        when(mediaAssetRepository.lockById(12L)).thenReturn(Optional.of(deleting));
+
+        assertThatIllegalArgumentException().isThrownBy(() -> service()
+                .synchronize(article(9L), "![diagram](/api/media/assets/12)", List.of()));
+
+        verify(articleMediaRepository, never()).saveAll(any());
+    }
+
+    @Test
     void usesAStableFallbackNameAndRejectsDuplicateAttachmentIds() {
         MediaAsset attachment = readyMedia(21L, MediaPurpose.ATTACHMENT, "  ");
         when(mediaAssetRepository.findById(21L)).thenReturn(Optional.of(attachment));

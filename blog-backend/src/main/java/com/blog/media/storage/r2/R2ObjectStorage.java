@@ -8,7 +8,8 @@ import com.blog.media.storage.StorageCapabilities;
 import com.blog.media.storage.StoredObject;
 import com.blog.media.storage.UploadMode;
 import com.blog.media.storage.UploadTicket;
-import com.blog.shared.error.ResourceNotFoundException;
+import com.blog.media.storage.ObjectStorageException;
+import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -93,8 +94,8 @@ public class R2ObjectStorage implements ObjectStorage {
             HeadObjectResponse response = client.headObject(HeadObjectRequest.builder()
                     .bucket(location.bucket()).key(objectKey).build());
             return new StoredObject(objectKey, requireContentType(response.contentType(), objectKey), response.contentLength(), response.eTag());
-        } catch (S3Exception exception) {
-            throw translateMissing(objectKey, exception);
+        } catch (SdkException exception) {
+            throw translateFailure(objectKey, exception);
         }
     }
 
@@ -105,8 +106,8 @@ public class R2ObjectStorage implements ObjectStorage {
             ResponseInputStream<GetObjectResponse> stream = client.getObject(GetObjectRequest.builder()
                     .bucket(location.bucket()).key(objectKey).build(), ResponseTransformer.toInputStream());
             return stream;
-        } catch (S3Exception exception) {
-            throw translateMissing(objectKey, exception);
+        } catch (SdkException exception) {
+            throw translateFailure(objectKey, exception);
         }
     }
 
@@ -125,9 +126,9 @@ public class R2ObjectStorage implements ObjectStorage {
         String objectKey = readableKey(location);
         try {
             client.deleteObject(DeleteObjectRequest.builder().bucket(location.bucket()).key(objectKey).build());
-        } catch (S3Exception exception) {
-            if (!isMissing(exception)) {
-                throw exception;
+        } catch (SdkException exception) {
+            if (!(exception instanceof S3Exception s3) || !isMissing(s3)) {
+                throw ObjectStorageException.transientFailure("Unable to delete R2 object", exception);
             }
         }
     }
@@ -190,11 +191,11 @@ public class R2ObjectStorage implements ObjectStorage {
         return contentType;
     }
 
-    private static RuntimeException translateMissing(String objectKey, S3Exception exception) {
-        if (isMissing(exception)) {
-            return new ResourceNotFoundException("Media object", objectKey);
+    private static ObjectStorageException translateFailure(String objectKey, SdkException exception) {
+        if (exception instanceof S3Exception s3 && isMissing(s3)) {
+            return ObjectStorageException.notFound("Media object not found: " + objectKey, exception);
         }
-        return exception;
+        return ObjectStorageException.transientFailure("Unable to access R2 object: " + objectKey, exception);
     }
 
     private static boolean isMissing(S3Exception exception) {

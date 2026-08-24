@@ -2,7 +2,6 @@ package com.blog.media.storage;
 
 import com.blog.media.MediaProperties;
 import com.blog.media.StorageProvider;
-import com.blog.shared.error.ResourceNotFoundException;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -98,7 +97,7 @@ public class LocalObjectStorage implements ObjectStorage {
         try {
             return new StoredObject(objectKey, contentType(objectKey), Files.size(path), sha256(path));
         } catch (IOException exception) {
-            throw new IllegalArgumentException("Unable to inspect media object", exception);
+            throw ObjectStorageException.transientFailure("Unable to inspect local media object", exception);
         }
     }
 
@@ -130,7 +129,7 @@ public class LocalObjectStorage implements ObjectStorage {
     private Path existingObjectPath(String objectKey) {
         Path path = objectPath(objectKey);
         if (!Files.isRegularFile(path)) {
-            throw new ResourceNotFoundException("Media asset", objectKey);
+            throw ObjectStorageException.notFound("Media object not found: " + objectKey, null);
         }
         return path;
     }

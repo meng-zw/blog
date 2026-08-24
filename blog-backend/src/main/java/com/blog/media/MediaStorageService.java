@@ -108,6 +108,7 @@ public class MediaStorageService {
     @Deprecated(since = "media-v2")
     public MediaAsset findByStorageKey(String storageKey) {
         return repository.findByProviderAndBucketAndStorageKey(StorageProvider.LOCAL, "", storageKey)
+                .filter(asset -> asset.getStatus() == MediaStatus.READY)
                 .orElseThrow(() -> new ResourceNotFoundException("Media asset", storageKey));
     }
 

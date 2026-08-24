@@ -124,9 +124,9 @@ class AdminMediaControllerTest {
 
     @Test
     void administratorCanFilterProviderNeutralMediaLibraryAndSeesReferenceState() throws Exception {
-        when(mediaApplicationService.list(0, 24, MediaStatus.READY, MediaPurpose.TOOL_COVER)).thenReturn(
+        when(mediaApplicationService.list(0, 24, MediaStatus.READY, MediaPurpose.TOOL_COVER, "owner")).thenReturn(
                 new PageResponse<>(List.of(new AdminMediaAssetResponse(7L, "tool.png", "image/png", 42L,
-                        1, 1, StorageProvider.R2, MediaStatus.READY, MediaPurpose.TOOL_COVER, true,
+                        1, 1, StorageProvider.R2, MediaStatus.READY, MediaPurpose.TOOL_COVER, true, false,
                         "/api/media/assets/7", Instant.parse("2026-08-24T00:00:00Z"))), 0, 24, 1, 1));
 
         mockMvc.perform(get("/api/admin/media").contextPath("/api").with(user("owner").roles("ADMIN"))
@@ -134,8 +134,9 @@ class AdminMediaControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].provider").value("R2"))
                 .andExpect(jsonPath("$.items[0].referenced").value(true))
+                .andExpect(jsonPath("$.items[0].can_delete").value(false))
                 .andExpect(jsonPath("$.items[0].url").value("/api/media/assets/7"));
-        verify(mediaApplicationService).list(0, 24, MediaStatus.READY, MediaPurpose.TOOL_COVER);
+        verify(mediaApplicationService).list(0, 24, MediaStatus.READY, MediaPurpose.TOOL_COVER, "owner");
     }
 
     private static MediaResponse response(long id) {

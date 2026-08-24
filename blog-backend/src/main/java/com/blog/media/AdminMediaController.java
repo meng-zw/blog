@@ -49,8 +49,9 @@ public class AdminMediaController {
     @GetMapping
     public com.blog.shared.web.PageResponse<com.blog.media.dto.AdminMediaAssetResponse> list(
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "24") int size,
-            @RequestParam(required = false) MediaStatus status, @RequestParam(required = false) MediaPurpose purpose) {
-        return mediaApplicationService.list(page, size, status, purpose);
+            @RequestParam(required = false) MediaStatus status, @RequestParam(required = false) MediaPurpose purpose,
+            Authentication authentication) {
+        return mediaApplicationService.list(page, size, status, purpose, authentication.getName());
     }
 
     @PutMapping(value = "/uploads/{mediaId}/content", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

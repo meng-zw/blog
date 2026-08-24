@@ -54,12 +54,36 @@ class GlobalExceptionHandlerTest {
                 .andExpect(jsonPath("$.traceId").isNotEmpty());
     }
 
+    @Test
+    void returnsServiceUnavailableForRetryableStorageFailures() throws Exception {
+        mockMvc.perform(get("/test/unavailable"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.detail").value("媒体存储暂时不可用，请稍后重试"));
+    }
+
+    @Test
+    void returnsNotFoundForMissingProviderObjectsOutsideCompletionWorkflow() throws Exception {
+        mockMvc.perform(get("/test/missing-object"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.detail").value("Media object not found"));
+    }
+
     @RestController
     static class TestController {
 
         @GetMapping("/test/not-found")
         void notFound() {
             throw new ResourceNotFoundException("article", "missing");
+        }
+
+        @GetMapping("/test/unavailable")
+        void unavailable() {
+            throw new ServiceUnavailableException("媒体存储暂时不可用，请稍后重试");
+        }
+
+        @GetMapping("/test/missing-object")
+        void missingObject() {
+            throw com.blog.media.storage.ObjectStorageException.notFound("Media object not found", null);
         }
 
         @PostMapping("/test/validate")
