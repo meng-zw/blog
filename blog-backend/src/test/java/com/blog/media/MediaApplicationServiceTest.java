@@ -262,6 +262,33 @@ class MediaApplicationServiceTest {
     }
 
     @Test
+    void finalizationRollbackReleasesClaimAndAllowsImmediateCompleteRetry() throws Exception {
+        Fixture fixture = fixture(StorageProvider.LOCAL, false);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        var firstClaim = verificationClaim(asset);
+        var secondClaim = new MediaOperationTransactionService.OperationClaim(firstClaim.mediaId(),
+                firstClaim.location(), firstClaim.purpose(), firstClaim.filename(), firstClaim.contentType(),
+                firstClaim.byteSize(), null, null, MediaStatus.VERIFYING, "operation-token-2");
+        when(fixture.operationTransactions.claimVerification(42L, "owner"))
+                .thenReturn(firstClaim, secondClaim);
+        byte[] bytes = png();
+        when(fixture.storage.inspect(location(asset))).thenReturn(
+                new StoredObject(asset.getStorageKey(), "image/png", bytes.length, "etag-1"));
+        when(fixture.storage.openStream(location(asset))).thenReturn(
+                new ByteArrayInputStream(bytes), new ByteArrayInputStream(bytes));
+        org.mockito.Mockito.doThrow(new org.springframework.dao.TransientDataAccessResourceException("commit rolled back"))
+                .when(fixture.operationTransactions).completeVerification(eq(firstClaim), any(), any());
+
+        assertThatThrownBy(() -> fixture.service.complete(42L, "owner"))
+                .isInstanceOf(ServiceUnavailableException.class);
+        verify(fixture.operationTransactions).releaseVerificationClaim(42L, firstClaim.operationToken());
+
+        assertThat(fixture.service.complete(42L, "owner").status()).isEqualTo(MediaStatus.READY);
+        verify(fixture.storage, never()).delete(any());
+        verify(fixture.deletionService, never()).cleanupOne(any(Long.class));
+    }
+
+    @Test
     void completesReadyMediaIdempotentlyWithoutReinspectingObject() {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
         MediaAsset asset = pendingAsset(42L, 7L);
@@ -305,6 +332,7 @@ class MediaApplicationServiceTest {
                 mock(AdminAccountRepository.class), registry, new MediaContentValidator(properties),
                 mock(MediaReferenceChecker.class), properties, mock(MediaDeletionService.class),
                 mock(MediaDeletionTransactionService.class), mock(MediaOperationTransactionService.class),
+                mock(MediaReadTransactionService.class),
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
         assertThat(service.resolvePublic(42L).location()).hasToString("https://archive.example/asset.png");
@@ -322,7 +350,9 @@ class MediaApplicationServiceTest {
         asset.setByteSize(9L);
         asset.setOriginalFilename("资料.pdf");
         asset.setStatus(MediaStatus.READY);
-        when(fixture.mediaRepository.findById(42L)).thenReturn(Optional.of(asset));
+        when(fixture.readTransactions.readySnapshot(42L)).thenReturn(
+                new MediaReadTransactionService.ReadyMediaSnapshot(42L, location(asset), asset.getContentType(),
+                        asset.getOriginalFilename(), asset.getByteSize(), asset.getPurpose()));
         when(fixture.storage.openStream(location(asset))).thenReturn(new ByteArrayInputStream("pdf-bytes".getBytes()));
 
         MediaApplicationService.PublicMediaContent content = fixture.service.openPublicDownload(42L);
@@ -402,6 +432,7 @@ class MediaApplicationServiceTest {
         MediaReferenceChecker referenceChecker = mock(MediaReferenceChecker.class);
         MediaDeletionTransactionService deletionTransactions = mock(MediaDeletionTransactionService.class);
         MediaOperationTransactionService operationTransactions = mock(MediaOperationTransactionService.class);
+        MediaReadTransactionService readTransactions = mock(MediaReadTransactionService.class);
         MediaDeletionService deletionService = mock(MediaDeletionService.class);
         MediaProperties properties = new MediaProperties();
         properties.setProvider(provider);
@@ -433,9 +464,9 @@ class MediaApplicationServiceTest {
         });
         MediaApplicationService service = new MediaApplicationService(mediaRepository, adminRepository, registry,
                 new MediaContentValidator(properties), referenceChecker, properties, deletionService,
-                deletionTransactions, operationTransactions, Clock.fixed(NOW, ZoneOffset.UTC));
+                deletionTransactions, operationTransactions, readTransactions, Clock.fixed(NOW, ZoneOffset.UTC));
         return new Fixture(service, mediaRepository, storage, referenceChecker, saved, deletionTransactions,
-                deletionService, operationTransactions);
+                deletionService, operationTransactions, readTransactions);
     }
 
     private static MediaAsset pendingAsset(long id, long ownerId) {
@@ -509,6 +540,7 @@ class MediaApplicationServiceTest {
     private record Fixture(MediaApplicationService service, MediaAssetRepository mediaRepository, ObjectStorage storage,
                            MediaReferenceChecker referenceChecker, MediaAsset saved,
                            MediaDeletionTransactionService deletionTransactions, MediaDeletionService deletionService,
-                           MediaOperationTransactionService operationTransactions) {
+                           MediaOperationTransactionService operationTransactions,
+                           MediaReadTransactionService readTransactions) {
     }
 }

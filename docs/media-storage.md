@@ -88,13 +88,15 @@ Compose 的 Nginx 入口将 `client_max_body_size` 设为 64 MiB，为后端 51 
 1. 管理员调用 `POST /api/admin/media/uploads` 申请上传。该接口要求管理员 Session 与 CSRF，返回 `DIRECT`（R2）或 `PROXY`（Local）计划。
 2. R2 时浏览器向预签名 URL 直接 `PUT`；Local 时浏览器带 Session/CSRF 向 `/api/admin/media/uploads/{id}/content` 上传。
 3. 浏览器调用 `POST /api/admin/media/{id}/complete`。服务先用短数据库事务将媒体从 `PENDING_UPLOAD` 原子认领为 `VERIFYING`，再在事务外验证对象，最后用第二个短事务将媒体置为 `READY`。重复 complete 是幂等的。
-4. Vditor 插入 `![名称](/api/media/assets/{id})`。公开读该地址会 302 到该媒体当前 provider 的公开地址；公开附件下载使用 `/api/media/assets/{id}/download`，并强制下载响应。
+4. Vditor 插入 `![名称](/api/media/assets/{id})`。公开读该地址会 302 到该媒体当前 provider 的公开地址；公开附件下载使用 `/api/media/assets/{id}/download`，并强制下载响应。附件下载只在短只读事务中复制 READY 媒体的位置与安全响应元数据，随后结束事务，再打开 provider 流并由 HTTP 流式响应负责关闭，避免慢下载占用数据库事务和连接。
 
 上传计划默认按“管理员账号 + 客户端 IP”每分钟最多 30 次，并最多跟踪 10000 个 key。该限流器是有界的单节点内存实现；单实例部署可直接使用。若横向扩展 API，发布前必须替换为 Redis 等共享限流实现，不能把每个节点各自的额度当成集群额度。
 
 未完成、失败、删除中或已删除媒体不会通过稳定公开地址读出。管理员只能开始删除没有文章、头像、封面、专题或工具引用的 READY 媒体，并可重试自己处于 `DELETING` 的媒体；文章删除只移除引用，不自动删除可能复用的对象。
 
 `complete` 会区分内容校验与存储故障：大小、类型、签名或图片解码不合法属于权威失败，服务先在独立事务中持久化 `FAILED`，再在事务外进入可恢复删除流程；R2 HEAD/GET 的超时、5xx、网络中断以及对象暂未可见会返回 HTTP 503，并把仍有效的认领释放回 `PENDING_UPLOAD`，前端可安全重试 `complete`，不会删除对象。Local 代理上传同样用 `UPLOADING` 短事务认领，数据库行锁不会跨越磁盘或网络 I/O。
+
+完成验证的最终数据库事务失败时，服务会用媒体 ID 与原 operation token 再做一次独立、带行锁的条件释放：只有仍处于 `VERIFYING` 且 token 完全匹配的记录才回到 `PENDING_UPLOAD`；若不确定的提交实际上已经成功并可见为 `READY`，或记录已被新操作接管，则绝不回退。客户端收到 HTTP 503 后可立即重试，而有效对象不会进入清理流程。
 
 媒体删除采用可恢复的两阶段状态机。服务先在独立数据库事务内锁定媒体、重新确认无引用并提交 `DELETING`，然后在事务外删除 Local/R2 对象，最后以第二个事务提交 `DELETED`。对象删除或最终数据库提交失败时，`DELETING`/`FAILED` 会保留，后台任务每次按更新时间处理最多 100 条并继续重试；对象删除必须保持幂等。完成认领与清理认领共享同一行级悲观锁和不可猜测的 `operation_token`，因此清理不可能删除一个随后又被写成 `READY` 的对象；进程崩溃遗留的 `UPLOADING`/`VERIFYING` 会在过期后由同一清理任务回收。因此发布或备份脚本不得把删除中状态当作已经彻底删除，也不要手工清除这些行。
 

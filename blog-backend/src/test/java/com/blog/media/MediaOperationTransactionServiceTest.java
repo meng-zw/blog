@@ -14,6 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 class MediaOperationTransactionServiceTest {
@@ -82,6 +83,36 @@ class MediaOperationTransactionServiceTest {
                 new MediaContentValidator.ValidatedContent(1, 1)))
                 .hasMessageContaining("claim");
         assertThat(asset.getStatus()).isEqualTo(MediaStatus.ABANDONED);
+    }
+
+    @Test
+    void releasesMatchingVerificationClaimAfterFinalizationRollback() {
+        Fixture fixture = fixture();
+        MediaAsset asset = pending();
+        asset.setStatus(MediaStatus.VERIFYING);
+        asset.setOperationToken("token-1");
+        when(fixture.repository.lockById(42L)).thenReturn(Optional.of(asset));
+
+        assertThat(fixture.service.releaseVerificationClaim(42L, "token-1")).isTrue();
+
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.PENDING_UPLOAD);
+        assertThat(asset.getOperationToken()).isNull();
+        assertThat(asset.getUpdatedAt()).isEqualTo(NOW);
+        verify(fixture.repository).saveAndFlush(asset);
+    }
+
+    @Test
+    void uncertainSuccessfulCommitCannotRegressReadyMediaToPending() {
+        Fixture fixture = fixture();
+        MediaAsset asset = pending();
+        asset.setStatus(MediaStatus.READY);
+        asset.setOperationToken(null);
+        when(fixture.repository.lockById(42L)).thenReturn(Optional.of(asset));
+
+        assertThat(fixture.service.releaseVerificationClaim(42L, "token-1")).isFalse();
+
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.READY);
+        verify(fixture.repository, never()).saveAndFlush(asset);
     }
 
     private Fixture fixture() {

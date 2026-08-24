@@ -45,6 +45,7 @@ public class MediaApplicationService {
     private final MediaDeletionService deletionService;
     private final MediaDeletionTransactionService deletionTransactions;
     private final MediaOperationTransactionService operationTransactions;
+    private final MediaReadTransactionService readTransactions;
     private final Clock clock;
 
     public MediaApplicationService(MediaAssetRepository mediaRepository, AdminAccountRepository adminAccountRepository,
@@ -52,9 +53,10 @@ public class MediaApplicationService {
                                    MediaReferenceChecker referenceChecker, MediaProperties properties,
                                    MediaDeletionService deletionService,
                                    MediaDeletionTransactionService deletionTransactions,
-                                   MediaOperationTransactionService operationTransactions) {
+                                   MediaOperationTransactionService operationTransactions,
+                                   MediaReadTransactionService readTransactions) {
         this(mediaRepository, adminAccountRepository, storageRegistry, contentValidator, referenceChecker, properties,
-                deletionService, deletionTransactions, operationTransactions, Clock.systemUTC());
+                deletionService, deletionTransactions, operationTransactions, readTransactions, Clock.systemUTC());
     }
 
     MediaApplicationService(MediaAssetRepository mediaRepository, AdminAccountRepository adminAccountRepository,
@@ -62,7 +64,8 @@ public class MediaApplicationService {
                             MediaReferenceChecker referenceChecker, MediaProperties properties,
                             MediaDeletionService deletionService,
                             MediaDeletionTransactionService deletionTransactions,
-                            MediaOperationTransactionService operationTransactions, Clock clock) {
+                            MediaOperationTransactionService operationTransactions,
+                            MediaReadTransactionService readTransactions, Clock clock) {
         this.mediaRepository = mediaRepository;
         this.adminAccountRepository = adminAccountRepository;
         this.storageRegistry = storageRegistry;
@@ -72,6 +75,7 @@ public class MediaApplicationService {
         this.deletionService = deletionService;
         this.deletionTransactions = deletionTransactions;
         this.operationTransactions = operationTransactions;
+        this.readTransactions = readTransactions;
         this.clock = clock;
     }
 
@@ -159,7 +163,16 @@ public class MediaApplicationService {
             safelyReleaseVerificationClaim(claim, exception);
             throw new ServiceUnavailableException("媒体存储暂时不可用，请稍后重试", exception);
         }
-        return response(operationTransactions.completeVerification(claim, stored, content));
+        try {
+            return response(operationTransactions.completeVerification(claim, stored, content));
+        } catch (RuntimeException exception) {
+            try {
+                operationTransactions.releaseVerificationClaim(claim.mediaId(), claim.operationToken());
+            } catch (RuntimeException releaseFailure) {
+                exception.addSuppressed(releaseFailure);
+            }
+            throw new ServiceUnavailableException("媒体存储暂时不可用，请稍后重试", exception);
+        }
     }
 
     public void delete(long mediaId, String username) {
@@ -195,12 +208,11 @@ public class MediaApplicationService {
      * Opens a public attachment through the active provider without exposing a provider URL to the browser.
      * The controller owns closing this stream after it has copied it to the HTTP response.
      */
-    @Transactional(readOnly = true)
     public PublicMediaContent openPublicDownload(long mediaId) {
-        MediaAsset asset = readyPublicAsset(mediaId);
+        var snapshot = readTransactions.readySnapshot(mediaId);
         try {
-            return new PublicMediaContent(storage(asset).openStream(location(asset)), asset.getContentType(),
-                    asset.getOriginalFilename(), asset.getByteSize());
+            return new PublicMediaContent(storageRegistry.get(snapshot.location().provider())
+                    .openStream(snapshot.location()), snapshot.contentType(), snapshot.filename(), snapshot.byteSize());
         } catch (IOException exception) {
             throw new IllegalArgumentException("Unable to open media object", exception);
         }

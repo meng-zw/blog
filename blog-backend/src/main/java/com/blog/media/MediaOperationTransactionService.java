@@ -80,6 +80,24 @@ public class MediaOperationTransactionService {
         release(claim, MediaStatus.VERIFYING);
     }
 
+    /**
+     * Recovers a claim after an uncertain finalization failure. A committed READY row or a newer claim
+     * must never be changed by the recovery attempt.
+     */
+    @Transactional
+    public boolean releaseVerificationClaim(long mediaId, String operationToken) {
+        MediaAsset asset = repository.lockById(mediaId).orElse(null);
+        if (asset == null || asset.getStatus() != MediaStatus.VERIFYING || operationToken == null
+                || !operationToken.equals(asset.getOperationToken())) {
+            return false;
+        }
+        asset.setStatus(MediaStatus.PENDING_UPLOAD);
+        asset.setOperationToken(null);
+        asset.setUpdatedAt(clock.instant());
+        repository.saveAndFlush(asset);
+        return true;
+    }
+
     @Transactional
     public void finishProxyUpload(OperationClaim claim) {
         release(claim, MediaStatus.UPLOADING);
