@@ -18,6 +18,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.S3Exception;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.PresignedPutObjectRequest;
@@ -143,6 +144,16 @@ class R2ObjectStorageTest {
     }
 
     @Test
+    void treatsA404DeleteAsAnIdempotentSuccess() throws Exception {
+        S3Client client = mock(S3Client.class);
+        when(client.deleteObject(any(DeleteObjectRequest.class))).thenThrow(S3Exception.builder().statusCode(404).build());
+
+        storage(client, mock(S3Presigner.class)).delete("inline-images/already-gone.png");
+
+        verify(client).deleteObject(any(DeleteObjectRequest.class));
+    }
+
+    @Test
     void rejectsNonHttpsPublicEndpointsBeforeAClientCanBeCreated() {
         R2Properties properties = new R2Properties();
         properties.setAccountId("account");
@@ -164,6 +175,19 @@ class R2ObjectStorageTest {
             assertThat(client.serviceClientConfiguration().region().id()).isEqualTo("auto");
             assertThat(client.serviceClientConfiguration().endpointOverride())
                     .contains(java.net.URI.create("https://account.r2.cloudflarestorage.com"));
+        }
+    }
+
+    @Test
+    void presignsPathStyleR2DirectUploadUrls() {
+        R2Properties properties = properties();
+
+        try (S3Presigner presigner = new R2Configuration().r2S3Presigner(properties)) {
+            R2ObjectStorage storage = new R2ObjectStorage(mock(S3Client.class), presigner, properties, Clock.fixed(NOW, ZoneOffset.UTC));
+
+            UploadTicket ticket = storage.createDirectUpload(new ObjectUploadRequest("inline-images/direct.png", "image/png", 7));
+
+            assertThat(ticket.uri().getPath()).isEqualTo("/blog-media/inline-images/direct.png");
         }
     }
 

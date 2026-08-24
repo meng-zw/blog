@@ -42,6 +42,10 @@ jobs:
       - name: Nginx template contract
         working-directory: blog-frontend
         run: npm run test:nginx-template
+      - name: Compose and media-release configuration contract
+        run: |
+          scripts/tests/backup_restore_static_test.sh
+          ruby -e 'require "yaml"; YAML.load_file("docker-compose.yml")'
       - name: Backup and restore script contract
         run: |
           for test_file in scripts/tests/*_test.sh; do

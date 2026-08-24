@@ -14,7 +14,6 @@ public class R2Properties {
     private String bucket;
     private String endpoint;
     private String publicBaseUrl;
-    private String region = "auto";
     private Duration uploadUrlTtl = Duration.ofMinutes(10);
 
     public String getAccountId() {
@@ -65,14 +64,6 @@ public class R2Properties {
         this.publicBaseUrl = trimmed(publicBaseUrl);
     }
 
-    public String getRegion() {
-        return region;
-    }
-
-    public void setRegion(String region) {
-        this.region = trimmed(region);
-    }
-
     public Duration getUploadUrlTtl() {
         return uploadUrlTtl;
     }
@@ -98,9 +89,6 @@ public class R2Properties {
         requireText(secretAccessKey, "R2 secret access key is required");
         requireText(bucket, "R2 bucket is required");
         requireText(publicBaseUrl, "R2 public base URL is required");
-        if (!"auto".equals(region)) {
-            throw new IllegalArgumentException("R2 region must be auto");
-        }
         if (uploadUrlTtl == null || uploadUrlTtl.isZero() || uploadUrlTtl.isNegative()
                 || uploadUrlTtl.compareTo(Duration.ofDays(7)) > 0) {
             throw new IllegalArgumentException("R2 upload URL TTL must be between zero and seven days");

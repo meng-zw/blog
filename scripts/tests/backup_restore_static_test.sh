@@ -3,6 +3,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 scripts_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo_dir=$(CDPATH= cd -- "$scripts_dir/.." && pwd)
 
 bash -n "$scripts_dir/backup.sh"
 bash -n "$scripts_dir/restore.sh"
@@ -37,5 +38,32 @@ grep -Fq 'rollback_db' "$scripts_dir/restore.sh"
 grep -Fq 'rollback_media' "$scripts_dir/restore.sh"
 grep -Fq -- '--allow-cross-target' "$scripts_dir/restore.sh"
 grep -Fq -- '--wait-timeout 120' "$scripts_dir/restore.sh"
+
+# Release media-storage contract: the Compose API is the only container that
+# receives R2 credentials. R2 values are deliberately optional at Compose
+# interpolation time because Local is the safe default; R2Properties performs
+# the required-value check only when BLOG_MEDIA_PROVIDER=r2 is selected.
+compose_file="$repo_dir/docker-compose.yml"
+production_env="$repo_dir/.env.example"
+test_env="$repo_dir/.env.test.example"
+grep -Fq 'BLOG_MEDIA_PROVIDER: ${BLOG_MEDIA_PROVIDER:-local}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_LOCAL_DIRECTORY: /app/data/media' "$compose_file"
+grep -Fq 'media-data:/app/data' "$compose_file"
+for variable in BLOG_MEDIA_R2_ACCOUNT_ID BLOG_MEDIA_R2_ACCESS_KEY_ID BLOG_MEDIA_R2_SECRET_ACCESS_KEY BLOG_MEDIA_R2_BUCKET BLOG_MEDIA_R2_ENDPOINT BLOG_MEDIA_R2_PUBLIC_BASE_URL BLOG_MEDIA_R2_UPLOAD_URL_TTL; do
+  grep -Fq "$variable: \${$variable:-}" "$compose_file"
+  grep -q "^$variable=" "$production_env"
+done
+grep -Fq 'BLOG_MEDIA_PROVIDER=local' "$production_env"
+grep -Fq 'BLOG_MEDIA_PROVIDER=local' "$test_env"
+grep -Eq '^BLOG_MEDIA_R2_ACCESS_KEY_ID=$' "$production_env"
+grep -Eq '^BLOG_MEDIA_R2_SECRET_ACCESS_KEY=$' "$production_env"
+! grep -Fq 'BLOG_MEDIA_R2_' "$test_env"
+
+# Credentials must not be injected into the public Nginx service or baked into
+# a frontend build argument. Keep this deliberately structural rather than
+# matching line positions in Compose.
+web_block=$(sed -n '/^  web:/,/^volumes:/p' "$compose_file")
+! grep -Fq 'BLOG_MEDIA_R2_' <<<"$web_block"
+! grep -Fq 'BLOG_MEDIA_R2_' "$repo_dir/blog-frontend/Dockerfile"
 
 printf 'backup/restore static checks passed\n'

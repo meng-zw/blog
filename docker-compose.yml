@@ -31,7 +31,17 @@ services:
       BLOG_ADMIN_DISPLAY_NAME: ${BLOG_ADMIN_DISPLAY_NAME:?set BLOG_ADMIN_DISPLAY_NAME}
       BLOG_PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL}
       BLOG_SESSION_COOKIE_SECURE: ${BLOG_SESSION_COOKIE_SECURE:-true}
-      BLOG_MEDIA_DIR: /app/data/media
+      # Local remains the default. R2 is validated by the API only when it is
+      # explicitly selected, so local deployments never need R2 credentials.
+      BLOG_MEDIA_PROVIDER: ${BLOG_MEDIA_PROVIDER:-local}
+      BLOG_MEDIA_LOCAL_DIRECTORY: /app/data/media
+      BLOG_MEDIA_R2_ACCOUNT_ID: ${BLOG_MEDIA_R2_ACCOUNT_ID:-}
+      BLOG_MEDIA_R2_ACCESS_KEY_ID: ${BLOG_MEDIA_R2_ACCESS_KEY_ID:-}
+      BLOG_MEDIA_R2_SECRET_ACCESS_KEY: ${BLOG_MEDIA_R2_SECRET_ACCESS_KEY:-}
+      BLOG_MEDIA_R2_BUCKET: ${BLOG_MEDIA_R2_BUCKET:-}
+      BLOG_MEDIA_R2_ENDPOINT: ${BLOG_MEDIA_R2_ENDPOINT:-}
+      BLOG_MEDIA_R2_PUBLIC_BASE_URL: ${BLOG_MEDIA_R2_PUBLIC_BASE_URL:-}
+      BLOG_MEDIA_R2_UPLOAD_URL_TTL: ${BLOG_MEDIA_R2_UPLOAD_URL_TTL:-}
     volumes: ["media-data:/app/data"]
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8081/api/actuator/health/readiness"]

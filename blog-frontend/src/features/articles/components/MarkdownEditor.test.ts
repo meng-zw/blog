@@ -129,4 +129,22 @@ describe('MarkdownEditor media uploads', () => {
     await expect(result).resolves.toBeNull()
     expect(insertValue).not.toHaveBeenCalled()
   })
+
+  it('ignores upload progress reported after the editor has unmounted', async () => {
+    let reportProgress!: (value: number) => void
+    let resolveUpload!: (value: { mediaId: number, filename: string, contentType: string, byteSize: number, width: number, height: number, status: 'READY', purpose: 'INLINE_IMAGE', url: string }) => void
+    vi.mocked(uploadMedia).mockImplementation((_file, _purpose, progress) => new Promise((resolve) => {
+      reportProgress = progress!
+      resolveUpload = resolve
+    }))
+    const { wrapper, handler } = await editorUpload()
+    const result = handler([new File(['data'], 'gone.png', { type: 'image/png' })])
+    wrapper.unmount()
+
+    reportProgress(80)
+    resolveUpload({ mediaId: 17, filename: 'gone.png', contentType: 'image/png', byteSize: 1, width: 1, height: 1, status: 'READY', purpose: 'INLINE_IMAGE', url: '/api/media/assets/17' })
+
+    await expect(result).resolves.toBeNull()
+    expect((wrapper.vm as unknown as { uploadProgress: number }).uploadProgress).toBe(0)
+  })
 })

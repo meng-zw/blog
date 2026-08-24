@@ -55,6 +55,7 @@ async function handleUpload(files: File[]): Promise<string | null> {
   try {
     for (const [index, file] of acceptedFiles.entries()) {
       const media = await uploadMedia(file, 'INLINE_IMAGE', (progress) => {
+        if (destroyed) return
         uploadProgress.value = Math.round(((index + progress / 100) / acceptedFiles.length) * 100)
       })
       if (destroyed) return null
