@@ -5,15 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Instant;
@@ -22,6 +21,11 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Flow;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** Secret-safe HTTP client for the Cloudreve v4 OAuth contracts. */
 @Component
@@ -134,25 +138,31 @@ public class CloudreveOAuthClient {
     }
 
     private JsonNode send(HttpRequest request) {
-        HttpResponse<InputStream> response;
+        CompletableFuture<HttpResponse<byte[]>> operation;
         try {
-            response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new OAuthUnavailableException("Cloudreve request was interrupted");
-        } catch (IOException | RuntimeException exception) {
+            operation = httpClient.sendAsync(request, ignored -> new LimitedBodySubscriber(MAX_RESPONSE_BYTES));
+        } catch (RuntimeException exception) {
             throw new OAuthUnavailableException("Cloudreve request failed");
         }
-        byte[] bytes;
-        try (InputStream input = response.body()) {
-            bytes = readBounded(input);
-        } catch (IOException exception) {
-            throw new OAuthUnavailableException("Cloudreve response could not be read");
+        HttpResponse<byte[]> response;
+        try {
+            response = operation.get(properties.getRequestTimeout().toNanos(), TimeUnit.NANOSECONDS);
+        } catch (TimeoutException exception) {
+            operation.cancel(true);
+            throw new OAuthUnavailableException("Cloudreve request timed out");
+        } catch (InterruptedException exception) {
+            operation.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new OAuthUnavailableException("Cloudreve request was interrupted");
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof OAuthProtocolException protocol) throw protocol;
+            throw new OAuthUnavailableException("Cloudreve request failed");
         }
         if (response.statusCode() >= 500) {
             throw new OAuthUnavailableException("Cloudreve returned HTTP " + response.statusCode());
         }
-        JsonNode json = parseJson(bytes);
+        JsonNode json = parseJson(response.body());
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             if (isInvalidGrant(json)) throw new InvalidGrantException();
             throw new OAuthUnavailableException("Cloudreve returned HTTP " + response.statusCode());
@@ -162,22 +172,57 @@ public class CloudreveOAuthClient {
 
     private JsonNode parseJson(byte[] bytes) {
         try {
-            return objectMapper.readTree(bytes);
-        } catch (IOException exception) {
+            JsonNode json = objectMapper.readTree(bytes);
+            if (json == null || !json.isObject()) {
+                throw new OAuthProtocolException("Cloudreve returned an invalid response");
+            }
+            return json;
+        } catch (IOException | RuntimeException exception) {
+            if (exception instanceof OAuthProtocolException protocol) throw protocol;
             throw new OAuthProtocolException("Cloudreve returned an invalid response");
         }
     }
 
-    private static byte[] readBounded(InputStream input) throws IOException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        byte[] buffer = new byte[4096];
-        int total = 0;
-        for (int read; (read = input.read(buffer)) != -1;) {
-            total += read;
-            if (total > MAX_RESPONSE_BYTES) throw new OAuthProtocolException("Cloudreve response exceeded the limit");
-            output.write(buffer, 0, read);
+    private static final class LimitedBodySubscriber implements HttpResponse.BodySubscriber<byte[]> {
+        private final int limit;
+        private final java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream();
+        private final CompletableFuture<byte[]> body = new CompletableFuture<>();
+        private Flow.Subscription subscription;
+        private int received;
+
+        private LimitedBodySubscriber(int limit) { this.limit = limit; }
+
+        @Override public java.util.concurrent.CompletionStage<byte[]> getBody() { return body; }
+
+        @Override
+        public void onSubscribe(Flow.Subscription subscription) {
+            if (this.subscription != null) {
+                subscription.cancel();
+                return;
+            }
+            this.subscription = Objects.requireNonNull(subscription);
+            subscription.request(Long.MAX_VALUE);
         }
-        return output.toByteArray();
+
+        @Override
+        public void onNext(List<ByteBuffer> buffers) {
+            if (body.isDone()) return;
+            for (ByteBuffer buffer : buffers) {
+                int next = buffer.remaining();
+                if (next > limit - received) {
+                    subscription.cancel();
+                    body.completeExceptionally(new OAuthProtocolException("Cloudreve response exceeded the limit"));
+                    return;
+                }
+                byte[] bytes = new byte[next];
+                buffer.get(bytes);
+                output.writeBytes(bytes);
+                received += next;
+            }
+        }
+
+        @Override public void onError(Throwable throwable) { body.completeExceptionally(throwable); }
+        @Override public void onComplete() { body.complete(output.toByteArray()); }
     }
 
     private static boolean isInvalidGrant(JsonNode json) {

@@ -18,14 +18,14 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
     @Autowired DataSource dataSource;
 
     @Test
-    void migratesAnEmptyDatabaseToVersionFifteen() {
+    void migratesAnEmptyDatabaseToVersionSixteen() {
         var flyway = Flyway.configure().dataSource(dataSource).load();
         assertThat(flyway.info().current()).isNull();
 
         var result = flyway.migrate();
         assertThat(result.success).isTrue();
-        assertThat(result.migrationsExecuted).isEqualTo(16);
-        assertThat(result.targetSchemaVersion).isEqualTo("15");
+        assertThat(result.migrationsExecuted).isEqualTo(17);
+        assertThat(result.targetSchemaVersion).isEqualTo("16");
     }
 
     @Test
@@ -41,7 +41,8 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
                 """).stream().map(row -> row.get("column_name")))
                 .contains("singleton_key", "access_token_ciphertext", "access_token_nonce", "access_token_expires_at",
                         "refresh_token_ciphertext", "refresh_token_nonce", "refresh_token_expires_at", "granted_scopes",
-                        "status", "version", "created_at", "updated_at")
+                        "status", "refresh_claim_token", "refresh_claimed_at", "authorization_generation",
+                        "version", "created_at", "updated_at")
                 .doesNotContain("client_secret", "token_encryption_key");
 
         jdbc.update("""

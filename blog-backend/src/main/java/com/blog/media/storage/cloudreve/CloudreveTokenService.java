@@ -2,6 +2,8 @@ package com.blog.media.storage.cloudreve;
 
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -24,6 +26,7 @@ public class CloudreveTokenService {
     private static final Duration AUTHORIZATION_TTL = Duration.ofMinutes(10);
     private static final Duration ACCESS_EXPIRY_SKEW = Duration.ofMinutes(1);
     private static final long REFRESH_POLL_NANOS = Duration.ofMillis(5).toNanos();
+    private static final Duration MINIMUM_REFRESH_CLAIM_LEASE = Duration.ofSeconds(30);
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final CloudreveProperties properties;
@@ -62,10 +65,21 @@ public class CloudreveTokenService {
 
     public URI beginAuthorization(long adminId) {
         requireAdmin(adminId);
+        Instant now = clock.instant();
+        long generation = database.execute(status -> {
+            CloudreveConnection connection = connections.findSingletonForUpdate().orElseGet(() -> {
+                CloudreveConnection created = new CloudreveConnection();
+                return connections.saveAndFlush(created);
+            });
+            long next = nextGeneration(connection.getAuthorizationGeneration());
+            connection.setAuthorizationGeneration(next);
+            connections.saveAndFlush(connection);
+            return next;
+        });
         String state = randomUrlToken(32);
         String verifier = randomUrlToken(64);
         authorizationTransactions.save(new CloudreveOAuthTransaction(
-                state, verifier, adminId, clock.instant().plus(AUTHORIZATION_TTL)));
+                state, verifier, adminId, now.plus(AUTHORIZATION_TTL), generation), now);
         return oauth.authorizationUri(state, verifier);
     }
 
@@ -82,10 +96,14 @@ public class CloudreveTokenService {
                 CloudreveConnection created = new CloudreveConnection();
                 return connections.saveAndFlush(created);
             });
+            if (connection.getAuthorizationGeneration() != transaction.authorizationGeneration()) {
+                throw new CloudreveAuthorizationRequiredException();
+            }
             persistPair(connection, pair);
             connection.setAuthorizedSubject(user.subject());
             connection.setAuthorizedDisplayName(user.displayName());
             connection.setStatus(CloudreveConnectionStatus.CONNECTED);
+            clearRefreshClaim(connection);
             connections.saveAndFlush(connection);
         });
     }
@@ -112,7 +130,9 @@ public class CloudreveTokenService {
         requireAdmin(adminId);
         authorizationTransactions.removeForAdmin(adminId);
         database.executeWithoutResult(status -> connections.findSingletonForUpdate().ifPresent(connection -> {
+            connection.setAuthorizationGeneration(nextGeneration(connection.getAuthorizationGeneration()));
             clearTokens(connection);
+            clearRefreshClaim(connection);
             connection.setAuthorizedSubject(null);
             connection.setAuthorizedDisplayName(null);
             connection.setGrantedScopes(null);
@@ -128,10 +148,13 @@ public class CloudreveTokenService {
                 || connection.getStatus() == CloudreveConnectionStatus.REAUTH_REQUIRED) {
             throw new CloudreveAuthorizationRequiredException();
         }
-        if (connection.getStatus() == CloudreveConnectionStatus.REFRESHING) {
-            return Waiting.INSTANCE;
-        }
         Instant now = clock.instant();
+        if (connection.getStatus() == CloudreveConnectionStatus.REFRESHING) {
+            if (!isStaleRefreshClaim(connection, now)) return Waiting.INSTANCE;
+            connection.setStatus(CloudreveConnectionStatus.CONNECTED);
+            clearRefreshClaim(connection);
+            connections.saveAndFlush(connection);
+        }
         try {
             if (connection.getAccessTokenExpiresAt() != null
                     && connection.getAccessTokenExpiresAt().isAfter(now.plus(ACCESS_EXPIRY_SKEW))) {
@@ -144,9 +167,12 @@ public class CloudreveTokenService {
             }
             String refreshToken = decrypt(connection, "refresh");
             List<String> scopes = parseStoredScopes(connection.getGrantedScopes());
+            String claimToken = randomUrlToken(24);
             connection.setStatus(CloudreveConnectionStatus.REFRESHING);
-            CloudreveConnection claimed = connections.saveAndFlush(connection);
-            return new RefreshClaim(claimed.getVersion(), refreshToken, scopes);
+            connection.setRefreshClaimToken(claimToken);
+            connection.setRefreshClaimedAt(now);
+            connections.saveAndFlush(connection);
+            return new RefreshClaim(claimToken, refreshToken, scopes);
         } catch (CloudreveTokenCipher.TokenDecryptionException exception) {
             requireReauthorization(connection);
             throw new CloudreveAuthorizationRequiredException();
@@ -158,22 +184,23 @@ public class CloudreveTokenService {
         try {
             pair = oauth.refresh(claim.refreshToken(), claim.scopes());
         } catch (CloudreveOAuthClient.InvalidGrantException exception) {
-            database.executeWithoutResult(status -> updateClaim(claim.version(), connection -> requireReauthorization(connection)));
+            database.executeWithoutResult(status -> updateClaim(claim.claimToken(), this::requireReauthorization));
             throw new CloudreveAuthorizationRequiredException();
         } catch (CloudreveOAuthClient.OAuthUnavailableException | CloudreveOAuthClient.OAuthProtocolException exception) {
-            database.executeWithoutResult(status -> updateClaim(claim.version(), connection -> {
-                connection.setStatus(CloudreveConnectionStatus.CONNECTED);
-                connections.saveAndFlush(connection);
-            }));
+            releaseRefreshClaim(claim.claimToken());
             throw exception;
+        } catch (RuntimeException exception) {
+            releaseRefreshClaim(claim.claimToken());
+            throw new CloudreveOAuthClient.OAuthUnavailableException("Cloudreve token refresh failed");
         }
         String winner = database.execute(status -> {
             CloudreveConnection connection = connections.findSingletonForUpdate()
                     .orElseThrow(CloudreveAuthorizationRequiredException::new);
             if (connection.getStatus() == CloudreveConnectionStatus.REFRESHING
-                    && connection.getVersion() == claim.version()) {
+                    && claim.claimToken().equals(connection.getRefreshClaimToken())) {
                 persistPair(connection, pair);
                 connection.setStatus(CloudreveConnectionStatus.CONNECTED);
+                clearRefreshClaim(connection);
                 connections.saveAndFlush(connection);
                 return pair.accessToken();
             }
@@ -186,13 +213,35 @@ public class CloudreveTokenService {
         return winner;
     }
 
-    private void updateClaim(long claimedVersion, java.util.function.Consumer<CloudreveConnection> update) {
+    private void releaseRefreshClaim(String claimToken) {
+        database.executeWithoutResult(status -> updateClaim(claimToken, connection -> {
+            connection.setStatus(CloudreveConnectionStatus.CONNECTED);
+            clearRefreshClaim(connection);
+            connections.saveAndFlush(connection);
+        }));
+    }
+
+    private void updateClaim(String claimToken, java.util.function.Consumer<CloudreveConnection> update) {
         connections.findSingletonForUpdate().ifPresent(connection -> {
             if (connection.getStatus() == CloudreveConnectionStatus.REFRESHING
-                    && connection.getVersion() == claimedVersion) {
+                    && claimToken.equals(connection.getRefreshClaimToken())) {
                 update.accept(connection);
             }
         });
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void recoverStaleRefreshClaimOnStartup() {
+        // Disabled installations do not initialize or query Cloudreve persistence at startup.
+        if (cipher == null) return;
+        database.executeWithoutResult(status -> connections.findSingletonForUpdate().ifPresent(connection -> {
+            if (connection.getStatus() == CloudreveConnectionStatus.REFRESHING
+                    && isStaleRefreshClaim(connection, clock.instant())) {
+                connection.setStatus(CloudreveConnectionStatus.CONNECTED);
+                clearRefreshClaim(connection);
+                connections.saveAndFlush(connection);
+            }
+        }));
     }
 
     private void persistPair(CloudreveConnection connection, CloudreveOAuthClient.TokenPair pair) {
@@ -222,6 +271,7 @@ public class CloudreveTokenService {
 
     private void requireReauthorization(CloudreveConnection connection) {
         clearTokens(connection);
+        clearRefreshClaim(connection);
         connection.setStatus(CloudreveConnectionStatus.REAUTH_REQUIRED);
         connections.saveAndFlush(connection);
     }
@@ -233,6 +283,29 @@ public class CloudreveTokenService {
         connection.setRefreshTokenCiphertext(null);
         connection.setRefreshTokenNonce(null);
         connection.setRefreshTokenExpiresAt(null);
+    }
+
+    private static void clearRefreshClaim(CloudreveConnection connection) {
+        connection.setRefreshClaimToken(null);
+        connection.setRefreshClaimedAt(null);
+    }
+
+    private boolean isStaleRefreshClaim(CloudreveConnection connection, Instant now) {
+        Instant claimedAt = connection.getRefreshClaimedAt();
+        String token = connection.getRefreshClaimToken();
+        return token == null || token.isBlank() || claimedAt == null
+                || !now.isBefore(claimedAt.plus(refreshClaimLease()));
+    }
+
+    private Duration refreshClaimLease() {
+        Duration requestLease = properties.getRequestTimeout().multipliedBy(2);
+        return requestLease.compareTo(MINIMUM_REFRESH_CLAIM_LEASE) > 0
+                ? requestLease : MINIMUM_REFRESH_CLAIM_LEASE;
+    }
+
+    private static long nextGeneration(long current) {
+        if (current == Long.MAX_VALUE) throw new IllegalStateException("Cloudreve authorization generation exhausted");
+        return current + 1;
     }
 
     private static List<String> parseStoredScopes(String scopes) {
@@ -261,6 +334,6 @@ public class CloudreveTokenService {
 
     private sealed interface AccessDecision permits Ready, RefreshClaim, Waiting {}
     private record Ready(String accessToken) implements AccessDecision {}
-    private record RefreshClaim(long version, String refreshToken, List<String> scopes) implements AccessDecision {}
+    private record RefreshClaim(String claimToken, String refreshToken, List<String> scopes) implements AccessDecision {}
     private enum Waiting implements AccessDecision { INSTANCE }
 }

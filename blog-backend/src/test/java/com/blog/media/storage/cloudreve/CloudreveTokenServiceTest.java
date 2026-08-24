@@ -49,6 +49,63 @@ class CloudreveTokenServiceTest {
     }
 
     @Test
+    void replacingAuthorizationForAnAdminIsAtomicAndPurgesExpiredTransactions() {
+        CloudreveOAuthTransactionRepository repository = new CloudreveOAuthTransactionRepository();
+        repository.save(new CloudreveOAuthTransaction("expired", "old", 41L, NOW.minusSeconds(1), 1));
+        repository.save(new CloudreveOAuthTransaction("first", "one", 42L, NOW.plusSeconds(60), 1));
+        repository.save(new CloudreveOAuthTransaction("second", "two", 42L, NOW.plusSeconds(60), 2));
+
+        assertThatThrownBy(() -> repository.consume("expired", 41L, NOW))
+                .isInstanceOf(CloudreveAuthorizationRequiredException.class);
+        assertThatThrownBy(() -> repository.consume("first", 42L, NOW))
+                .isInstanceOf(CloudreveAuthorizationRequiredException.class);
+        assertThat(repository.consume("second", 42L, NOW).authorizationGeneration()).isEqualTo(2);
+    }
+
+    @Test
+    void concurrentAuthorizationReplacementLeavesExactlyOneStateForAnAdmin() throws Exception {
+        CloudreveOAuthTransactionRepository repository = new CloudreveOAuthTransactionRepository();
+        CountDownLatch start = new CountDownLatch(1);
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = executor.submit(() -> {
+                start.await();
+                repository.save(new CloudreveOAuthTransaction("first", "one", 42L, NOW.plusSeconds(60), 1), NOW);
+                return null;
+            });
+            var second = executor.submit(() -> {
+                start.await();
+                repository.save(new CloudreveOAuthTransaction("second", "two", 42L, NOW.plusSeconds(60), 2), NOW);
+                return null;
+            });
+            start.countDown();
+            first.get(2, TimeUnit.SECONDS);
+            second.get(2, TimeUnit.SECONDS);
+        }
+
+        int consumable = 0;
+        for (String state : List.of("first", "second")) {
+            try {
+                repository.consume(state, 42L, NOW);
+                consumable++;
+            } catch (CloudreveAuthorizationRequiredException ignored) {
+                // The losing state must be gone.
+            }
+        }
+        assertThat(consumable).isOne();
+    }
+
+    @Test
+    void delayedOlderAuthorizationCannotEvictANewerGeneration() {
+        CloudreveOAuthTransactionRepository repository = new CloudreveOAuthTransactionRepository();
+        repository.save(new CloudreveOAuthTransaction("newer", "two", 42L, NOW.plusSeconds(60), 2), NOW);
+        repository.save(new CloudreveOAuthTransaction("older", "one", 42L, NOW.plusSeconds(60), 1), NOW);
+
+        assertThatThrownBy(() -> repository.consume("older", 42L, NOW))
+                .isInstanceOf(CloudreveAuthorizationRequiredException.class);
+        assertThat(repository.consume("newer", 42L, NOW).authorizationGeneration()).isEqualTo(2);
+    }
+
+    @Test
     void transactionToStringDoesNotRevealStateOrVerifier() {
         CloudreveOAuthTransaction transaction = new CloudreveOAuthTransaction(
                 "state-secret", "verifier-secret", 42L, NOW.plusSeconds(60));
@@ -151,6 +208,110 @@ class CloudreveTokenServiceTest {
     }
 
     @Test
+    void staleRefreshClaimIsReclaimedAfterAServiceRestart() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
+        CloudreveConnection connection = fixture.store.connection.get();
+        connection.setStatus(CloudreveConnectionStatus.REFRESHING);
+        connection.setRefreshClaimToken("dead-process");
+        connection.setRefreshClaimedAt(NOW.minusSeconds(120));
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList()))
+                .thenReturn(fixture.pair("new-access", "rotated-refresh"));
+
+        CloudreveTokenService restarted = fixture.serviceWithKey(Fixture.KEY);
+        assertThat(restarted.validAccessToken()).isEqualTo("new-access");
+
+        assertThat(connection.getStatus()).isEqualTo(CloudreveConnectionStatus.CONNECTED);
+        assertThat(connection.getRefreshClaimToken()).isNull();
+        assertThat(connection.getRefreshClaimedAt()).isNull();
+        verify(fixture.oauth, times(1)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList());
+    }
+
+    @Test
+    void startupRecoveryReleasesAnExpiredDurableRefreshClaimWithoutNetworkIo() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
+        CloudreveConnection connection = fixture.store.connection.get();
+        connection.setStatus(CloudreveConnectionStatus.REFRESHING);
+        connection.setRefreshClaimToken("dead-process");
+        connection.setRefreshClaimedAt(NOW.minusSeconds(120));
+
+        fixture.service.recoverStaleRefreshClaimOnStartup();
+
+        assertThat(connection.getStatus()).isEqualTo(CloudreveConnectionStatus.CONNECTED);
+        assertThat(connection.getRefreshClaimToken()).isNull();
+        assertThat(connection.getRefreshClaimedAt()).isNull();
+        verify(fixture.oauth, times(0)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList());
+    }
+
+    @Test
+    void freshRefreshClaimWaitsInsteadOfStealingAnotherOwnersToken() {
+        Fixture fixture = new Fixture(Duration.ofMillis(40));
+        fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
+        CloudreveConnection connection = fixture.store.connection.get();
+        connection.setStatus(CloudreveConnectionStatus.REFRESHING);
+        connection.setRefreshClaimToken("live-process");
+        connection.setRefreshClaimedAt(NOW);
+
+        assertThatThrownBy(fixture.service::validAccessToken)
+                .isInstanceOf(CloudreveOAuthClient.OAuthUnavailableException.class);
+        assertThat(connection.getRefreshClaimToken()).isEqualTo("live-process");
+        verify(fixture.oauth, times(0)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList());
+    }
+
+    @Test
+    void malformedRefreshResponseReleasesOnlyItsClaimAndCanBeRetried() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList()))
+                .thenThrow(new CloudreveOAuthClient.OAuthProtocolException("invalid response"))
+                .thenReturn(fixture.pair("new-access", "rotated-refresh"));
+
+        assertThatThrownBy(fixture.service::validAccessToken)
+                .isInstanceOf(CloudreveOAuthClient.OAuthProtocolException.class);
+        assertThat(fixture.store.connection.get().getStatus()).isEqualTo(CloudreveConnectionStatus.CONNECTED);
+        assertThat(fixture.store.connection.get().getRefreshClaimToken()).isNull();
+
+        assertThat(fixture.service.validAccessToken()).isEqualTo("new-access");
+        verify(fixture.oauth, times(2)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList());
+    }
+
+    @Test
+    void staleOwnerCannotReleaseAReplacementRefreshClaim() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList())).thenAnswer(invocation -> {
+            CloudreveConnection connection = fixture.store.connection.get();
+            connection.setRefreshClaimToken("replacement-owner");
+            connection.setRefreshClaimedAt(NOW);
+            throw new CloudreveOAuthClient.OAuthProtocolException("invalid response");
+        });
+
+        assertThatThrownBy(fixture.service::validAccessToken)
+                .isInstanceOf(CloudreveOAuthClient.OAuthProtocolException.class);
+
+        CloudreveConnection saved = fixture.store.connection.get();
+        assertThat(saved.getStatus()).isEqualTo(CloudreveConnectionStatus.REFRESHING);
+        assertThat(saved.getRefreshClaimToken()).isEqualTo("replacement-owner");
+    }
+
+    @Test
+    void uncheckedRefreshFailureIsNormalizedAndReleasesItsClaim() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList()))
+                .thenThrow(new IllegalStateException("decoder implementation failed"));
+
+        assertThatThrownBy(fixture.service::validAccessToken)
+                .isInstanceOf(CloudreveOAuthClient.OAuthUnavailableException.class)
+                .hasMessageNotContaining("decoder implementation failed");
+
+        CloudreveConnection saved = fixture.store.connection.get();
+        assertThat(saved.getStatus()).isEqualTo(CloudreveConnectionStatus.CONNECTED);
+        assertThat(saved.getRefreshClaimToken()).isNull();
+    }
+
+    @Test
     void invalidGrantRequiresReauthorizationAndClearsPersistedTokens() {
         Fixture fixture = new Fixture();
         fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
@@ -204,6 +365,65 @@ class CloudreveTokenServiceTest {
                 .isInstanceOf(CloudreveAuthorizationRequiredException.class);
     }
 
+    @Test
+    void callbackCannotReconnectAfterDisconnectAdvancesAuthorizationGeneration() throws Exception {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("old-access", "old-refresh", NOW.plusSeconds(600), NOW.plusSeconds(1200));
+        CountDownLatch exchangeStarted = new CountDownLatch(1);
+        CountDownLatch releaseExchange = new CountDownLatch(1);
+        when(fixture.oauth.exchangeCode(anyString(), anyString())).thenAnswer(invocation -> {
+            exchangeStarted.countDown();
+            assertThat(releaseExchange.await(2, TimeUnit.SECONDS)).isTrue();
+            return fixture.pair("late-access", "late-refresh");
+        });
+        when(fixture.oauth.userInfo("late-access"))
+                .thenReturn(new CloudreveOAuthClient.UserInfo("late", "Late"));
+        String state = queryParameter(fixture.service.beginAuthorization(42L), "state");
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var callback = executor.submit(() -> fixture.service.completeAuthorization("code", state, 42L));
+            assertThat(exchangeStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            fixture.service.disconnect(42L);
+            releaseExchange.countDown();
+            assertThatThrownBy(() -> callback.get(2, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(CloudreveAuthorizationRequiredException.class);
+        }
+
+        assertThat(fixture.store.connection.get().getStatus()).isEqualTo(CloudreveConnectionStatus.DISCONNECTED);
+        assertThat(fixture.store.connection.get().getAccessTokenCiphertext()).isNull();
+    }
+
+    @Test
+    void olderPausedCallbackCannotOverwriteACompletedNewerAuthorization() throws Exception {
+        Fixture fixture = new Fixture();
+        CountDownLatch oldExchangeStarted = new CountDownLatch(1);
+        CountDownLatch releaseOldExchange = new CountDownLatch(1);
+        when(fixture.oauth.exchangeCode(org.mockito.ArgumentMatchers.eq("old-code"), anyString())).thenAnswer(invocation -> {
+            oldExchangeStarted.countDown();
+            assertThat(releaseOldExchange.await(2, TimeUnit.SECONDS)).isTrue();
+            return fixture.pair("old-access", "old-refresh");
+        });
+        when(fixture.oauth.exchangeCode(org.mockito.ArgumentMatchers.eq("new-code"), anyString()))
+                .thenReturn(fixture.pair("new-access", "new-refresh"));
+        when(fixture.oauth.userInfo("old-access")).thenReturn(new CloudreveOAuthClient.UserInfo("old", "Old"));
+        when(fixture.oauth.userInfo("new-access")).thenReturn(new CloudreveOAuthClient.UserInfo("new", "New"));
+        String oldState = queryParameter(fixture.service.beginAuthorization(42L), "state");
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var oldCallback = executor.submit(() -> fixture.service.completeAuthorization("old-code", oldState, 42L));
+            assertThat(oldExchangeStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            String newState = queryParameter(fixture.service.beginAuthorization(42L), "state");
+            fixture.service.completeAuthorization("new-code", newState, 42L);
+            releaseOldExchange.countDown();
+            assertThatThrownBy(() -> oldCallback.get(2, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(CloudreveAuthorizationRequiredException.class);
+        }
+
+        CloudreveConnection saved = fixture.store.connection.get();
+        assertThat(saved.getAuthorizedSubject()).isEqualTo("new");
+        assertThat(fixture.decrypt(saved, "access")).isEqualTo("new-access");
+    }
+
     private static String queryParameter(URI uri, String name) {
         return java.util.Arrays.stream(uri.getRawQuery().split("&"))
                 .map(part -> part.split("=", 2))
@@ -221,7 +441,10 @@ class CloudreveTokenServiceTest {
         final FakeConnectionStore store = new FakeConnectionStore(KEY);
         final CloudreveTokenService service = serviceWithKey(KEY);
 
-        Fixture() {
+        Fixture() { this(Duration.ofSeconds(2)); }
+
+        Fixture(Duration requestTimeout) {
+            properties.setRequestTimeout(requestTimeout);
             when(oauth.authorizationUri(anyString(), anyString())).thenAnswer(invocation ->
                     URI.create("https://cloud.example/session/authorize?state="
                             + java.net.URLEncoder.encode(invocation.getArgument(0), java.nio.charset.StandardCharsets.UTF_8)));

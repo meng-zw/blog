@@ -31,9 +31,15 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class CloudreveOAuthClientTest {
     private static final Instant NOW = Instant.parse("2026-08-24T00:00:00Z");
@@ -180,6 +186,59 @@ class CloudreveOAuthClientTest {
     }
 
     @Test
+    void emptyAndMalformedJsonResponsesAreTypedRetryableProtocolFailures() {
+        StubHttpClient empty = new StubHttpClient();
+        empty.enqueue(200, "");
+        StubHttpClient malformed = new StubHttpClient();
+        malformed.enqueue(200, "{not-json");
+
+        assertThatThrownBy(() -> client(empty).refresh("refresh", List.of("offline_access", "Files.Write")))
+                .isInstanceOf(CloudreveOAuthClient.OAuthProtocolException.class);
+        assertThatThrownBy(() -> client(malformed).refresh("refresh", List.of("offline_access", "Files.Write")))
+                .isInstanceOf(CloudreveOAuthClient.OAuthProtocolException.class);
+    }
+
+    @Test
+    void uncheckedJsonDecoderFailureIsNormalizedWithoutLeakingTheBody() throws Exception {
+        StubHttpClient http = new StubHttpClient();
+        http.enqueue(200, "sensitive-provider-body");
+        ObjectMapper failingMapper = mock(ObjectMapper.class);
+        when(failingMapper.writeValueAsString(any())).thenReturn("{\"refresh_token\":\"refresh\"}");
+        when(failingMapper.readTree(any(byte[].class))).thenThrow(new IllegalStateException("decoder failed"));
+        CloudreveProperties properties = properties(Duration.ofSeconds(1));
+        CloudreveOAuthClient client = new CloudreveOAuthClient(
+                properties, http, failingMapper, Clock.fixed(NOW, ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> client.refresh("refresh", List.of("offline_access", "Files.Write")))
+                .isInstanceOf(CloudreveOAuthClient.OAuthProtocolException.class)
+                .hasMessageNotContaining("sensitive-provider-body");
+    }
+
+    @Test
+    void totalDeadlineCancelsAResponseThatSendsHeadersThenStalls() throws Exception {
+        StreamingHttpClient http = new StreamingHttpClient(false);
+        long started = System.nanoTime();
+
+        assertThatThrownBy(() -> client(http, Duration.ofMillis(50)).userInfo("access-token"))
+                .isInstanceOf(CloudreveOAuthClient.OAuthUnavailableException.class);
+
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(1));
+        assertThat(http.cancelled.await(1, TimeUnit.SECONDS)).isTrue();
+    }
+
+    @Test
+    void dripFeedingAResponseCannotKeepExtendingTheTotalDeadline() throws Exception {
+        StreamingHttpClient http = new StreamingHttpClient(true);
+        long started = System.nanoTime();
+
+        assertThatThrownBy(() -> client(http, Duration.ofMillis(60)).userInfo("access-token"))
+                .isInstanceOf(CloudreveOAuthClient.OAuthUnavailableException.class);
+
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(1));
+        assertThat(http.cancelled.await(1, TimeUnit.SECONDS)).isTrue();
+    }
+
+    @Test
     void tokenPairToStringRedactsBothCredentials() {
         CloudreveOAuthClient.TokenPair pair = new CloudreveOAuthClient.TokenPair(
                 "access-secret", "refresh-secret", NOW.plusSeconds(60), NOW.plusSeconds(120),
@@ -189,13 +248,22 @@ class CloudreveOAuthClientTest {
     }
 
     private static CloudreveOAuthClient client(HttpClient httpClient) {
+        return client(httpClient, Duration.ofSeconds(3));
+    }
+
+    private static CloudreveOAuthClient client(HttpClient httpClient, Duration requestTimeout) {
+        CloudreveProperties properties = properties(requestTimeout);
+        return new CloudreveOAuthClient(properties, httpClient, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private static CloudreveProperties properties(Duration requestTimeout) {
         CloudreveProperties properties = new CloudreveProperties();
         properties.setBaseUrl(URI.create("https://cloud.example"));
         properties.setRedirectUri(URI.create("https://blog.example/oauth/callback"));
         properties.setClientId("client-id");
         properties.setClientSecret("client-secret");
-        properties.setRequestTimeout(Duration.ofSeconds(3));
-        return new CloudreveOAuthClient(properties, httpClient, new ObjectMapper(), Clock.fixed(NOW, ZoneOffset.UTC));
+        properties.setRequestTimeout(requestTimeout);
+        return properties;
     }
 
     private static Map<String, String> query(URI uri) {
@@ -251,8 +319,30 @@ class CloudreveOAuthClientTest {
         @Override public Optional<Authenticator> authenticator() { return Optional.empty(); }
         @Override public Version version() { return Version.HTTP_1_1; }
         @Override public Optional<Executor> executor() { return Optional.empty(); }
-        @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request, HttpResponse.BodyHandler<T> handler) { throw new UnsupportedOperationException(); }
-        @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request, HttpResponse.BodyHandler<T> handler, HttpResponse.PushPromiseHandler<T> pushPromiseHandler) { throw new UnsupportedOperationException(); }
+        @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request, HttpResponse.BodyHandler<T> handler) {
+            if (failure != null) return CompletableFuture.failedFuture(failure);
+            requests.add(request);
+            try {
+                bodies.add(readBody(request));
+            } catch (IOException exception) {
+                return CompletableFuture.failedFuture(exception);
+            }
+            StubResponse next = responses.remove();
+            HttpResponse.BodySubscriber<T> subscriber = handler.apply(new HttpResponse.ResponseInfo() {
+                @Override public int statusCode() { return next.status(); }
+                @Override public HttpHeaders headers() { return HttpHeaders.of(Map.of(), (a, b) -> true); }
+                @Override public Version version() { return Version.HTTP_1_1; }
+            });
+            subscriber.onSubscribe(new Flow.Subscription() {
+                @Override public void request(long n) {}
+                @Override public void cancel() {}
+            });
+            subscriber.onNext(List.of(ByteBuffer.wrap(next.body().getBytes(StandardCharsets.UTF_8))));
+            subscriber.onComplete();
+            return subscriber.getBody().toCompletableFuture().thenApply(body ->
+                    StreamingHttpClient.response(request, next.status(), body));
+        }
+        @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request, HttpResponse.BodyHandler<T> handler, HttpResponse.PushPromiseHandler<T> pushPromiseHandler) { return sendAsync(request, handler); }
     }
 
     private record StubResponse(int status, String body) {
@@ -267,6 +357,87 @@ class CloudreveOAuthClientTest {
                 @Override public URI uri() { return request.uri(); }
                 @Override public HttpClient.Version version() { return HttpClient.Version.HTTP_1_1; }
             };
+        }
+    }
+
+    private static final class StreamingHttpClient extends HttpClient {
+        private final boolean drip;
+        private final CountDownLatch cancelled = new CountDownLatch(1);
+
+        private StreamingHttpClient(boolean drip) { this.drip = drip; }
+
+        @Override
+        public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request,
+                                                                 HttpResponse.BodyHandler<T> handler) {
+            HttpResponse.BodySubscriber<T> subscriber = handler.apply(new HttpResponse.ResponseInfo() {
+                @Override public int statusCode() { return 200; }
+                @Override public HttpHeaders headers() { return HttpHeaders.of(Map.of(), (a, b) -> true); }
+                @Override public Version version() { return Version.HTTP_1_1; }
+            });
+            AtomicBoolean stopped = new AtomicBoolean();
+            subscriber.onSubscribe(new Flow.Subscription() {
+                @Override public void request(long n) {}
+                @Override public void cancel() { stopped.set(true); cancelled.countDown(); }
+            });
+            if (drip) {
+                Thread.ofVirtual().start(() -> {
+                    byte[] bytes = "{\"sub\":\"subject\",\"name\":\"Drip User\"}".getBytes(StandardCharsets.UTF_8);
+                    for (byte value : bytes) {
+                        if (stopped.get()) return;
+                        subscriber.onNext(List.of(ByteBuffer.wrap(new byte[]{value})));
+                        try {
+                            Thread.sleep(20);
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            return;
+                        }
+                    }
+                    subscriber.onComplete();
+                });
+            }
+            CompletableFuture<HttpResponse<T>> result = subscriber.getBody().toCompletableFuture()
+                    .thenApply(body -> response(request, body));
+            result.whenComplete((ignored, failure) -> {
+                if (result.isCancelled()) {
+                    stopped.set(true);
+                    cancelled.countDown();
+                }
+            });
+            return result;
+        }
+
+        private static <T> HttpResponse<T> response(HttpRequest request, T body) {
+            return response(request, 200, body);
+        }
+
+        private static <T> HttpResponse<T> response(HttpRequest request, int status, T body) {
+            return new HttpResponse<>() {
+                @Override public int statusCode() { return status; }
+                @Override public HttpRequest request() { return request; }
+                @Override public Optional<HttpResponse<T>> previousResponse() { return Optional.empty(); }
+                @Override public HttpHeaders headers() { return HttpHeaders.of(Map.of(), (a, b) -> true); }
+                @Override public T body() { return body; }
+                @Override public Optional<SSLSession> sslSession() { return Optional.empty(); }
+                @Override public URI uri() { return request.uri(); }
+                @Override public Version version() { return Version.HTTP_1_1; }
+            };
+        }
+
+        @Override public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler) {
+            throw new AssertionError("OAuth requests must use an asynchronous total-operation deadline");
+        }
+        @Override public Optional<CookieHandler> cookieHandler() { return Optional.empty(); }
+        @Override public Optional<Duration> connectTimeout() { return Optional.empty(); }
+        @Override public Redirect followRedirects() { return Redirect.NEVER; }
+        @Override public Optional<ProxySelector> proxy() { return Optional.empty(); }
+        @Override public SSLContext sslContext() { return null; }
+        @Override public SSLParameters sslParameters() { return null; }
+        @Override public Optional<Authenticator> authenticator() { return Optional.empty(); }
+        @Override public Version version() { return Version.HTTP_1_1; }
+        @Override public Optional<Executor> executor() { return Optional.empty(); }
+        @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request,
+                HttpResponse.BodyHandler<T> handler, HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
+            return sendAsync(request, handler);
         }
     }
 }

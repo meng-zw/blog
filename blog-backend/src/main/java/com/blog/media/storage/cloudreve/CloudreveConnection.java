@@ -69,6 +69,16 @@ public class CloudreveConnection extends AuditedEntity {
     @Column(nullable = false, length = 30)
     private CloudreveConnectionStatus status = CloudreveConnectionStatus.DISCONNECTED;
 
+    @JsonIgnore
+    @Column(name = "refresh_claim_token", length = 64)
+    private String refreshClaimToken;
+
+    @Column(name = "refresh_claimed_at")
+    private Instant refreshClaimedAt;
+
+    @Column(name = "authorization_generation", nullable = false)
+    private long authorizationGeneration;
+
     @Version
     @Column(nullable = false)
     private long version;
@@ -96,6 +106,15 @@ public class CloudreveConnection extends AuditedEntity {
     public void setGrantedScopes(String grantedScopes) { this.grantedScopes = grantedScopes; }
     public CloudreveConnectionStatus getStatus() { return status; }
     public void setStatus(CloudreveConnectionStatus status) { this.status = status; }
+    public String getRefreshClaimToken() { return refreshClaimToken; }
+    public void setRefreshClaimToken(String refreshClaimToken) { this.refreshClaimToken = refreshClaimToken; }
+    public Instant getRefreshClaimedAt() { return refreshClaimedAt; }
+    public void setRefreshClaimedAt(Instant refreshClaimedAt) { this.refreshClaimedAt = refreshClaimedAt; }
+    public long getAuthorizationGeneration() { return authorizationGeneration; }
+    public void setAuthorizationGeneration(long authorizationGeneration) {
+        if (authorizationGeneration < 0) throw new IllegalArgumentException("Authorization generation cannot be negative");
+        this.authorizationGeneration = authorizationGeneration;
+    }
     public long getVersion() { return version; }
 
     private static byte[] copy(byte[] value) {

@@ -21,7 +21,8 @@ class CloudreveConnectionMappingTest {
                 .extracting(Field::getName)
                 .contains("singletonKey", "authorizedSubject", "authorizedDisplayName", "accessTokenCiphertext",
                         "accessTokenNonce", "accessTokenExpiresAt", "refreshTokenCiphertext", "refreshTokenNonce",
-                        "refreshTokenExpiresAt", "grantedScopes", "status", "version");
+                        "refreshTokenExpiresAt", "grantedScopes", "status", "refreshClaimToken",
+                        "refreshClaimedAt", "authorizationGeneration", "version");
 
         assertThat(field("accessTokenCiphertext").getType()).isEqualTo(byte[].class);
         assertThat(field("accessTokenNonce").getType()).isEqualTo(byte[].class);
@@ -35,6 +36,9 @@ class CloudreveConnectionMappingTest {
         assertThat(field("refreshTokenNonce").getAnnotation(JdbcTypeCode.class).value()).isEqualTo(Types.BINARY);
         assertThat(field("accessTokenExpiresAt").getType()).isEqualTo(Instant.class);
         assertThat(field("refreshTokenExpiresAt").getType()).isEqualTo(Instant.class);
+        assertThat(field("refreshClaimToken").getType()).isEqualTo(String.class);
+        assertThat(field("refreshClaimedAt").getType()).isEqualTo(Instant.class);
+        assertThat(field("authorizationGeneration").getType()).isEqualTo(long.class);
         assertThat(field("status").getAnnotation(Enumerated.class).value()).isEqualTo(EnumType.STRING);
         assertThat(field("version").getAnnotation(Version.class)).isNotNull();
         assertThat(CloudreveConnection.class.getDeclaredFields()).extracting(Field::getName)
