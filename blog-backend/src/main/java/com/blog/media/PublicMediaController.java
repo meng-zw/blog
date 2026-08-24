@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.nio.charset.StandardCharsets;
 
@@ -24,21 +25,29 @@ public class PublicMediaController {
 
     @GetMapping("/{mediaId}")
     public ResponseEntity<Void> open(@PathVariable long mediaId) {
-        return redirect(mediaApplicationService.resolvePublic(mediaId), false);
+        return redirect(mediaApplicationService.resolvePublic(mediaId));
     }
 
     @GetMapping("/{mediaId}/download")
-    public ResponseEntity<Void> download(@PathVariable long mediaId) {
-        return redirect(mediaApplicationService.resolvePublic(mediaId), true);
+    public ResponseEntity<StreamingResponseBody> download(@PathVariable long mediaId) {
+        MediaApplicationService.PublicMediaContent asset = mediaApplicationService.openPublicDownload(mediaId);
+        StreamingResponseBody body = outputStream -> {
+            try (var content = asset.content()) {
+                content.transferTo(outputStream);
+            }
+        };
+        return ResponseEntity.ok()
+                .contentType(org.springframework.http.MediaType.parseMediaType(asset.contentType()))
+                .contentLength(asset.byteSize())
+                .cacheControl(CacheControl.noStore())
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                        .filename(asset.filename(), StandardCharsets.UTF_8).build().toString())
+                .body(body);
     }
 
-    private static ResponseEntity<Void> redirect(MediaApplicationService.PublicMediaAsset asset, boolean download) {
+    private static ResponseEntity<Void> redirect(MediaApplicationService.PublicMediaAsset asset) {
         ResponseEntity.BodyBuilder response = ResponseEntity.status(HttpStatus.FOUND).location(asset.location())
                 .cacheControl(CacheControl.noStore());
-        if (download) {
-            response.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
-                    .filename(asset.filename(), StandardCharsets.UTF_8).build().toString());
-        }
         return response.build();
     }
 }

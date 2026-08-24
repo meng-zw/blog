@@ -168,13 +168,24 @@ public class MediaApplicationService {
 
     @Transactional(readOnly = true)
     public PublicMediaAsset resolvePublic(long mediaId) {
-        MediaAsset asset = mediaRepository.findById(mediaId)
-                .orElseThrow(() -> new ResourceNotFoundException("Media asset", Long.toString(mediaId)));
-        if (asset.getStatus() != MediaStatus.READY) {
-            throw new ResourceNotFoundException("Media asset", Long.toString(mediaId));
-        }
+        MediaAsset asset = readyPublicAsset(mediaId);
         return new PublicMediaAsset(storage(asset).resolvePublicUrl(asset.getStorageKey()), asset.getContentType(),
                 asset.getOriginalFilename(), asset.getPurpose());
+    }
+
+    /**
+     * Opens a public attachment through the active provider without exposing a provider URL to the browser.
+     * The controller owns closing this stream after it has copied it to the HTTP response.
+     */
+    @Transactional(readOnly = true)
+    public PublicMediaContent openPublicDownload(long mediaId) {
+        MediaAsset asset = readyPublicAsset(mediaId);
+        try {
+            return new PublicMediaContent(storage(asset).openStream(asset.getStorageKey()), asset.getContentType(),
+                    asset.getOriginalFilename(), asset.getByteSize());
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Unable to open media object", exception);
+        }
     }
 
     @Transactional
@@ -241,6 +252,15 @@ public class MediaApplicationService {
                 .orElseThrow(() -> new ResourceNotFoundException("Media asset", Long.toString(mediaId)));
     }
 
+    private MediaAsset readyPublicAsset(long mediaId) {
+        MediaAsset asset = mediaRepository.findById(mediaId)
+                .orElseThrow(() -> new ResourceNotFoundException("Media asset", Long.toString(mediaId)));
+        if (asset.getStatus() != MediaStatus.READY) {
+            throw new ResourceNotFoundException("Media asset", Long.toString(mediaId));
+        }
+        return asset;
+    }
+
     private AdminAccount currentAdministrator(String username) {
         if (username == null || username.isBlank()) {
             throw new ResourceNotFoundException("Administrator", "current");
@@ -297,5 +317,8 @@ public class MediaApplicationService {
     }
 
     public record PublicMediaAsset(URI location, String contentType, String filename, MediaPurpose purpose) {
+    }
+
+    public record PublicMediaContent(InputStream content, String contentType, String filename, long byteSize) {
     }
 }

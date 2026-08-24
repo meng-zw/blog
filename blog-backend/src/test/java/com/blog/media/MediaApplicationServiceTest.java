@@ -156,6 +156,29 @@ class MediaApplicationServiceTest {
     }
 
     @Test
+    void opensReadyAttachmentContentFromTheCurrentStorageProviderWithoutUsingItsPublicUrl() throws Exception {
+        Fixture fixture = fixture(StorageProvider.R2, true);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        asset.setProvider(StorageProvider.R2);
+        asset.setBucket("blog-media");
+        asset.setPurpose(MediaPurpose.ATTACHMENT);
+        asset.setContentType("application/pdf");
+        asset.setByteSize(9L);
+        asset.setOriginalFilename("资料.pdf");
+        asset.setStatus(MediaStatus.READY);
+        when(fixture.mediaRepository.findById(42L)).thenReturn(Optional.of(asset));
+        when(fixture.storage.openStream(asset.getStorageKey())).thenReturn(new ByteArrayInputStream("pdf-bytes".getBytes()));
+
+        MediaApplicationService.PublicMediaContent content = fixture.service.openPublicDownload(42L);
+
+        assertThat(content.content().readAllBytes()).isEqualTo("pdf-bytes".getBytes());
+        assertThat(content.filename()).isEqualTo("资料.pdf");
+        assertThat(content.contentType()).isEqualTo("application/pdf");
+        assertThat(content.byteSize()).isEqualTo(9L);
+        verify(fixture.storage, never()).resolvePublicUrl(asset.getStorageKey());
+    }
+
+    @Test
     void abandonsExpiredPendingUploadAndRemovesItsObject() throws Exception {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
         MediaAsset asset = pendingAsset(42L, 7L);

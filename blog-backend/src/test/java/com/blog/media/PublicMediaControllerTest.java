@@ -17,10 +17,12 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.net.URI;
+import java.io.ByteArrayInputStream;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(controllers = PublicMediaController.class)
@@ -47,13 +49,17 @@ class PublicMediaControllerTest {
     }
 
     @Test
-    void attachmentDownloadAddsSafeAttachmentDisposition() throws Exception {
-        when(mediaApplicationService.resolvePublic(42L)).thenReturn(new MediaApplicationService.PublicMediaAsset(
-                URI.create("https://cdn.example/attachments/42.pdf"), "application/pdf", "资料.pdf", MediaPurpose.ATTACHMENT));
+    void attachmentDownloadStreamsProviderContentWithSafeFinalDisposition() throws Exception {
+        when(mediaApplicationService.openPublicDownload(42L)).thenReturn(new MediaApplicationService.PublicMediaContent(
+                new ByteArrayInputStream("pdf-bytes".getBytes()), "application/pdf", "资料.pdf", 9L));
 
         mockMvc.perform(get("/api/media/assets/42/download").contextPath("/api"))
-                .andExpect(status().isFound())
+                .andExpect(status().isOk())
                 .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("attachment")))
-                .andExpect(header().string("Location", "https://cdn.example/attachments/42.pdf"));
+                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("filename*=UTF-8''")))
+                .andExpect(header().string("Content-Type", "application/pdf"))
+                .andExpect(header().longValue("Content-Length", 9L))
+                .andExpect(header().doesNotExist("Location"))
+                .andExpect(content().bytes("pdf-bytes".getBytes()));
     }
 }
