@@ -3,6 +3,7 @@ package com.blog.media;
 import com.blog.article.Article;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -100,6 +101,17 @@ class ArticleMediaReferenceServiceTest {
 
         verify(articleMediaRepository).deleteByArticle_Id(9L);
         verify(articleMediaRepository, org.mockito.Mockito.never()).saveAll(any());
+    }
+
+    @Test
+    void attachmentLookupFetchesMediaWithTheReferenceRowsToAvoidDetailNPlusOneQueries() throws NoSuchMethodException {
+        var query = ArticleMediaRepository.class.getMethod("findByArticle_IdAndId_RoleOrderBySortOrderAsc",
+                Long.class, ArticleMediaRole.class);
+
+        EntityGraph entityGraph = query.getAnnotation(EntityGraph.class);
+
+        assertThat(entityGraph).isNotNull();
+        assertThat(entityGraph.attributePaths()).containsExactly("media");
     }
 
     private ArticleMediaReferenceService service() {
