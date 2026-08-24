@@ -18,14 +18,43 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
     @Autowired DataSource dataSource;
 
     @Test
-    void migratesAnEmptyDatabaseToVersionFourteenPointOne() {
+    void migratesAnEmptyDatabaseToVersionFifteen() {
         var flyway = Flyway.configure().dataSource(dataSource).load();
         assertThat(flyway.info().current()).isNull();
 
         var result = flyway.migrate();
         assertThat(result.success).isTrue();
-        assertThat(result.migrationsExecuted).isEqualTo(15);
-        assertThat(result.targetSchemaVersion).isEqualTo("14.1");
+        assertThat(result.migrationsExecuted).isEqualTo(16);
+        assertThat(result.targetSchemaVersion).isEqualTo("15");
+    }
+
+    @Test
+    void createsOneEncryptedCloudreveConnectionRecord() {
+        var flyway = Flyway.configure().dataSource(dataSource).load();
+        assertThat(flyway.migrate().success).isTrue();
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+
+        assertThat(jdbc.queryForList("""
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE() AND table_name = 'cloudreve_connection'
+                """).stream().map(row -> row.get("column_name")))
+                .contains("singleton_key", "access_token_ciphertext", "access_token_nonce", "access_token_expires_at",
+                        "refresh_token_ciphertext", "refresh_token_nonce", "refresh_token_expires_at", "granted_scopes",
+                        "status", "version", "created_at", "updated_at")
+                .doesNotContain("client_secret", "token_encryption_key");
+
+        jdbc.update("""
+                INSERT INTO cloudreve_connection
+                    (singleton_key, access_token_ciphertext, access_token_nonce, refresh_token_ciphertext,
+                     refresh_token_nonce, status)
+                VALUES (1, X'0102', X'0102030405060708090A0B0C', X'0304', X'0D0E0F101112131415161718', 'CONNECTED')
+                """);
+
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO cloudreve_connection (singleton_key, status)
+                VALUES (1, 'DISCONNECTED')
+                """)).isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
@@ -134,7 +163,7 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
         var result = Flyway.configure().dataSource(dataSource).load().migrate();
 
         assertThat(result.success).isTrue();
-        assertThat(result.targetSchemaVersion).isEqualTo("14.1");
+        assertThat(result.targetSchemaVersion).isEqualTo("15");
         List<ToolMediaRow> rows = jdbc.query("""
                 SELECT tool_id, media_id, sort_order
                 FROM tool_media

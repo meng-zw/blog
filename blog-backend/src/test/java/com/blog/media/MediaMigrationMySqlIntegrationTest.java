@@ -76,7 +76,7 @@ class MediaMigrationMySqlIntegrationTest {
         var result = flyway().migrate();
 
         assertThat(result.success).isTrue();
-        assertThat(result.targetSchemaVersion).isEqualTo("14.1");
+        assertThat(result.targetSchemaVersion).isEqualTo("15");
         assertLocationIdentityContract();
         assertLengthPrefixedIdentityAvoidsDelimiterCollisions();
     }

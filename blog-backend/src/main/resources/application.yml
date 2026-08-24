@@ -47,6 +47,21 @@ blog:
       public-base-url: ${BLOG_MEDIA_R2_PUBLIC_BASE_URL:}
       legacy-buckets: ${BLOG_MEDIA_R2_LEGACY_BUCKETS:}
       upload-url-ttl: ${BLOG_MEDIA_R2_UPLOAD_URL_TTL:10m}
+    cloudreve:
+      enabled: ${BLOG_MEDIA_CLOUDREVE_ENABLED:false}
+      base-url: ${BLOG_MEDIA_CLOUDREVE_BASE_URL:}
+      authorization-uri: ${BLOG_MEDIA_CLOUDREVE_AUTHORIZATION_URI:}
+      token-uri: ${BLOG_MEDIA_CLOUDREVE_TOKEN_URI:}
+      refresh-uri: ${BLOG_MEDIA_CLOUDREVE_REFRESH_URI:}
+      userinfo-uri: ${BLOG_MEDIA_CLOUDREVE_USERINFO_URI:}
+      redirect-uri: ${BLOG_MEDIA_CLOUDREVE_REDIRECT_URI:}
+      client-id: ${BLOG_MEDIA_CLOUDREVE_CLIENT_ID:}
+      client-secret: ${BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET:}
+      root-path: ${BLOG_MEDIA_CLOUDREVE_ROOT_PATH:/blog}
+      token-encryption-key: ${BLOG_MEDIA_TOKEN_ENCRYPTION_KEY:}
+      allow-trusted-internal-http: ${BLOG_MEDIA_CLOUDREVE_ALLOW_TRUSTED_INTERNAL_HTTP:false}
+      connect-timeout: ${BLOG_MEDIA_CLOUDREVE_CONNECT_TIMEOUT:5s}
+      request-timeout: ${BLOG_MEDIA_CLOUDREVE_REQUEST_TIMEOUT:30s}
   admin:
     bootstrap:
       username: ${BLOG_ADMIN_USERNAME:}

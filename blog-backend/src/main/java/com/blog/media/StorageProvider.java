@@ -2,5 +2,6 @@ package com.blog.media;
 
 public enum StorageProvider {
     LOCAL,
-    R2
+    R2,
+    CLOUDREVE
 }

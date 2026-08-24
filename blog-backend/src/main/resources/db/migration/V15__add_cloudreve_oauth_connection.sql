@@ -1,0 +1,19 @@
+CREATE TABLE cloudreve_connection (
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    singleton_key TINYINT NOT NULL DEFAULT 1,
+    authorized_subject VARCHAR(255) NULL,
+    authorized_display_name VARCHAR(255) NULL,
+    access_token_ciphertext MEDIUMBLOB NULL,
+    access_token_nonce BINARY(12) NULL,
+    access_token_expires_at DATETIME(6) NULL,
+    refresh_token_ciphertext MEDIUMBLOB NULL,
+    refresh_token_nonce BINARY(12) NULL,
+    refresh_token_expires_at DATETIME(6) NULL,
+    granted_scopes VARCHAR(1000) NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'DISCONNECTED',
+    version BIGINT NOT NULL DEFAULT 0,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_cloudreve_connection_singleton (singleton_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
