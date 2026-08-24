@@ -227,6 +227,20 @@ class CloudreveOAuthClientTest {
     }
 
     @Test
+    void callerCanTightenTheConfiguredDeadlineForARefreshAttempt() throws Exception {
+        StreamingHttpClient http = new StreamingHttpClient(false);
+        CloudreveOAuthClient client = client(http, Duration.ofSeconds(2));
+        long started = System.nanoTime();
+
+        assertThatThrownBy(() -> client.refresh("refresh", List.of("offline_access", "Files.Write"),
+                        Duration.ofMillis(50)))
+                .isInstanceOf(CloudreveOAuthClient.OAuthUnavailableException.class);
+
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(1));
+        assertThat(http.cancelled.await(1, TimeUnit.SECONDS)).isTrue();
+    }
+
+    @Test
     void dripFeedingAResponseCannotKeepExtendingTheTotalDeadline() throws Exception {
         StreamingHttpClient http = new StreamingHttpClient(true);
         long started = System.nanoTime();

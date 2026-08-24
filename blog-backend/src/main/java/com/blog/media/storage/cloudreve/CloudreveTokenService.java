@@ -27,6 +27,7 @@ public class CloudreveTokenService {
     private static final Duration ACCESS_EXPIRY_SKEW = Duration.ofMinutes(1);
     private static final long REFRESH_POLL_NANOS = Duration.ofMillis(5).toNanos();
     private static final Duration MINIMUM_REFRESH_CLAIM_LEASE = Duration.ofSeconds(30);
+    private static final int MAX_REFRESH_ATTEMPTS_PER_REQUEST = 2;
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final CloudreveProperties properties;
@@ -111,17 +112,36 @@ public class CloudreveTokenService {
     public String validAccessToken() {
         ensureCipher();
         long deadline = System.nanoTime() + properties.getRequestTimeout().toNanos();
+        int refreshAttempts = 0;
         while (true) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) throw refreshUnavailable();
             AccessDecision decision = database.execute(status -> decideAccess());
             if (decision instanceof Ready ready) return ready.accessToken();
-            if (decision instanceof RefreshClaim claim) return performRefresh(claim);
-            if (System.nanoTime() >= deadline) {
-                throw new CloudreveOAuthClient.OAuthUnavailableException("Cloudreve token refresh is still in progress");
+            if (decision instanceof RefreshClaim claim) {
+                if (refreshAttempts >= MAX_REFRESH_ATTEMPTS_PER_REQUEST) {
+                    releaseRefreshClaim(claim.claimToken());
+                    throw refreshUnavailable();
+                }
+                refreshAttempts++;
+                remaining = deadline - System.nanoTime();
+                if (remaining <= 0) {
+                    releaseRefreshClaim(claim.claimToken());
+                    throw refreshUnavailable();
+                }
+                AccessDecision afterRefresh = performRefresh(claim, Duration.ofNanos(remaining));
+                if (afterRefresh instanceof Ready ready) return ready.accessToken();
+                if (refreshAttempts >= MAX_REFRESH_ATTEMPTS_PER_REQUEST) throw refreshUnavailable();
+                decision = afterRefresh;
             }
-            LockSupport.parkNanos(REFRESH_POLL_NANOS);
-            if (Thread.interrupted()) {
-                Thread.currentThread().interrupt();
-                throw new CloudreveOAuthClient.OAuthUnavailableException("Cloudreve token wait was interrupted");
+            if (decision instanceof Waiting) {
+                remaining = deadline - System.nanoTime();
+                if (remaining <= 0) throw refreshUnavailable();
+                LockSupport.parkNanos(Math.min(REFRESH_POLL_NANOS, remaining));
+                if (Thread.interrupted()) {
+                    Thread.currentThread().interrupt();
+                    throw new CloudreveOAuthClient.OAuthUnavailableException("Cloudreve token wait was interrupted");
+                }
             }
         }
     }
@@ -156,8 +176,7 @@ public class CloudreveTokenService {
             connections.saveAndFlush(connection);
         }
         try {
-            if (connection.getAccessTokenExpiresAt() != null
-                    && connection.getAccessTokenExpiresAt().isAfter(now.plus(ACCESS_EXPIRY_SKEW))) {
+            if (hasFreshAccessToken(connection, now)) {
                 return new Ready(decrypt(connection, "access"));
             }
             if (connection.getRefreshTokenExpiresAt() == null
@@ -179,10 +198,10 @@ public class CloudreveTokenService {
         }
     }
 
-    private String performRefresh(RefreshClaim claim) {
+    private AccessDecision performRefresh(RefreshClaim claim, Duration operationTimeout) {
         CloudreveOAuthClient.TokenPair pair;
         try {
-            pair = oauth.refresh(claim.refreshToken(), claim.scopes());
+            pair = oauth.refresh(claim.refreshToken(), claim.scopes(), operationTimeout);
         } catch (CloudreveOAuthClient.InvalidGrantException exception) {
             database.executeWithoutResult(status -> updateClaim(claim.claimToken(), this::requireReauthorization));
             throw new CloudreveAuthorizationRequiredException();
@@ -193,7 +212,7 @@ public class CloudreveTokenService {
             releaseRefreshClaim(claim.claimToken());
             throw new CloudreveOAuthClient.OAuthUnavailableException("Cloudreve token refresh failed");
         }
-        String winner = database.execute(status -> {
+        return database.execute(status -> {
             CloudreveConnection connection = connections.findSingletonForUpdate()
                     .orElseThrow(CloudreveAuthorizationRequiredException::new);
             if (connection.getStatus() == CloudreveConnectionStatus.REFRESHING
@@ -202,15 +221,28 @@ public class CloudreveTokenService {
                 connection.setStatus(CloudreveConnectionStatus.CONNECTED);
                 clearRefreshClaim(connection);
                 connections.saveAndFlush(connection);
-                return pair.accessToken();
+                return new Ready(pair.accessToken());
             }
-            if (connection.getStatus() != CloudreveConnectionStatus.CONNECTED) {
-                throw new CloudreveAuthorizationRequiredException();
+            if (connection.getStatus() == CloudreveConnectionStatus.REFRESHING) {
+                return Waiting.INSTANCE;
             }
-            return decrypt(connection, "access");
+            if (connection.getStatus() == CloudreveConnectionStatus.CONNECTED) {
+                if (hasFreshAccessToken(connection, clock.instant())) {
+                    return new Ready(decrypt(connection, "access"));
+                }
+                return Retry.INSTANCE;
+            }
+            throw new CloudreveAuthorizationRequiredException();
         });
-        if (winner == null) throw new CloudreveAuthorizationRequiredException();
-        return winner;
+    }
+
+    private static boolean hasFreshAccessToken(CloudreveConnection connection, Instant now) {
+        return connection.getAccessTokenExpiresAt() != null
+                && connection.getAccessTokenExpiresAt().isAfter(now.plus(ACCESS_EXPIRY_SKEW));
+    }
+
+    private static CloudreveOAuthClient.OAuthUnavailableException refreshUnavailable() {
+        return new CloudreveOAuthClient.OAuthUnavailableException("Cloudreve token refresh is still in progress");
     }
 
     private void releaseRefreshClaim(String claimToken) {
@@ -332,8 +364,9 @@ public class CloudreveTokenService {
         if (adminId <= 0) throw new IllegalArgumentException("Administrator ID is required");
     }
 
-    private sealed interface AccessDecision permits Ready, RefreshClaim, Waiting {}
+    private sealed interface AccessDecision permits Ready, RefreshClaim, Waiting, Retry {}
     private record Ready(String accessToken) implements AccessDecision {}
     private record RefreshClaim(String claimToken, String refreshToken, List<String> scopes) implements AccessDecision {}
     private enum Waiting implements AccessDecision { INSTANCE }
+    private enum Retry implements AccessDecision { INSTANCE }
 }

@@ -10,6 +10,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.List;
@@ -18,10 +19,12 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -164,14 +167,14 @@ class CloudreveTokenServiceTest {
         fixture.store.connected("access", "refresh", NOW.plusSeconds(600), NOW.plusSeconds(1200));
 
         assertThat(fixture.service.validAccessToken()).isEqualTo("access");
-        verify(fixture.oauth, times(0)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList());
+        verify(fixture.oauth, times(0)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class));
     }
 
     @Test
     void refreshesOutsideTheDatabaseTransactionAndPersistsRotatedPair() {
         Fixture fixture = new Fixture();
         fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
-        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList())).thenAnswer(invocation -> {
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class))).thenAnswer(invocation -> {
             assertThat(fixture.transactions.active.get()).isFalse();
             return fixture.pair("new-access", "rotated-refresh");
         });
@@ -189,7 +192,7 @@ class CloudreveTokenServiceTest {
         fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
         CountDownLatch refreshStarted = new CountDownLatch(1);
         CountDownLatch releaseRefresh = new CountDownLatch(1);
-        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList())).thenAnswer(invocation -> {
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class))).thenAnswer(invocation -> {
             refreshStarted.countDown();
             assertThat(releaseRefresh.await(2, TimeUnit.SECONDS)).isTrue();
             return fixture.pair("new-access", "rotated-refresh");
@@ -204,7 +207,45 @@ class CloudreveTokenServiceTest {
             assertThat(first.get(2, TimeUnit.SECONDS)).isEqualTo("new-access");
             assertThat(second.get(2, TimeUnit.SECONDS)).isEqualTo("new-access");
         }
-        verify(fixture.oauth, times(1)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList());
+        verify(fixture.oauth, times(1)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class));
+    }
+
+    @Test
+    void expiredLosingOwnerNeverReturnsStoredExpiredAccessAfterReplacementClaimFails() throws Exception {
+        MutableClock clock = new MutableClock(NOW);
+        Fixture fixture = new Fixture(Duration.ofSeconds(2), clock);
+        fixture.store.connected("expired-access", "refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
+        CountDownLatch ownerAStarted = new CountDownLatch(1);
+        CountDownLatch releaseOwnerA = new CountDownLatch(1);
+        AtomicInteger refreshCalls = new AtomicInteger();
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class))).thenAnswer(invocation -> {
+            return switch (refreshCalls.incrementAndGet()) {
+                case 1 -> {
+                    ownerAStarted.countDown();
+                    assertThat(releaseOwnerA.await(2, TimeUnit.SECONDS)).isTrue();
+                    yield fixture.pair("owner-a-unpersisted", "owner-a-refresh");
+                }
+                case 2 -> throw new CloudreveOAuthClient.OAuthUnavailableException("owner B transient failure");
+                case 3 -> fixture.pair("eventual-valid-access", "eventual-valid-refresh");
+                default -> throw new AssertionError("unexpected extra refresh attempt");
+            };
+        });
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var ownerA = executor.submit(fixture.service::validAccessToken);
+            assertThat(ownerAStarted.await(2, TimeUnit.SECONDS)).isTrue();
+            clock.advance(Duration.ofSeconds(120));
+
+            assertThatThrownBy(fixture.service::validAccessToken)
+                    .isInstanceOf(CloudreveOAuthClient.OAuthUnavailableException.class);
+            assertThat(fixture.store.connection.get().getStatus()).isEqualTo(CloudreveConnectionStatus.CONNECTED);
+
+            releaseOwnerA.countDown();
+            assertThat(ownerA.get(2, TimeUnit.SECONDS)).isEqualTo("eventual-valid-access");
+        }
+
+        assertThat(fixture.decrypt(fixture.store.connection.get(), "access")).isEqualTo("eventual-valid-access");
+        assertThat(refreshCalls).hasValue(3);
     }
 
     @Test
@@ -215,7 +256,7 @@ class CloudreveTokenServiceTest {
         connection.setStatus(CloudreveConnectionStatus.REFRESHING);
         connection.setRefreshClaimToken("dead-process");
         connection.setRefreshClaimedAt(NOW.minusSeconds(120));
-        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList()))
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class)))
                 .thenReturn(fixture.pair("new-access", "rotated-refresh"));
 
         CloudreveTokenService restarted = fixture.serviceWithKey(Fixture.KEY);
@@ -224,7 +265,7 @@ class CloudreveTokenServiceTest {
         assertThat(connection.getStatus()).isEqualTo(CloudreveConnectionStatus.CONNECTED);
         assertThat(connection.getRefreshClaimToken()).isNull();
         assertThat(connection.getRefreshClaimedAt()).isNull();
-        verify(fixture.oauth, times(1)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList());
+        verify(fixture.oauth, times(1)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class));
     }
 
     @Test
@@ -241,7 +282,7 @@ class CloudreveTokenServiceTest {
         assertThat(connection.getStatus()).isEqualTo(CloudreveConnectionStatus.CONNECTED);
         assertThat(connection.getRefreshClaimToken()).isNull();
         assertThat(connection.getRefreshClaimedAt()).isNull();
-        verify(fixture.oauth, times(0)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList());
+        verify(fixture.oauth, times(0)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class));
     }
 
     @Test
@@ -256,14 +297,14 @@ class CloudreveTokenServiceTest {
         assertThatThrownBy(fixture.service::validAccessToken)
                 .isInstanceOf(CloudreveOAuthClient.OAuthUnavailableException.class);
         assertThat(connection.getRefreshClaimToken()).isEqualTo("live-process");
-        verify(fixture.oauth, times(0)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList());
+        verify(fixture.oauth, times(0)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class));
     }
 
     @Test
     void malformedRefreshResponseReleasesOnlyItsClaimAndCanBeRetried() {
         Fixture fixture = new Fixture();
         fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
-        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList()))
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class)))
                 .thenThrow(new CloudreveOAuthClient.OAuthProtocolException("invalid response"))
                 .thenReturn(fixture.pair("new-access", "rotated-refresh"));
 
@@ -273,14 +314,14 @@ class CloudreveTokenServiceTest {
         assertThat(fixture.store.connection.get().getRefreshClaimToken()).isNull();
 
         assertThat(fixture.service.validAccessToken()).isEqualTo("new-access");
-        verify(fixture.oauth, times(2)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList());
+        verify(fixture.oauth, times(2)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class));
     }
 
     @Test
     void staleOwnerCannotReleaseAReplacementRefreshClaim() {
         Fixture fixture = new Fixture();
         fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
-        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList())).thenAnswer(invocation -> {
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class))).thenAnswer(invocation -> {
             CloudreveConnection connection = fixture.store.connection.get();
             connection.setRefreshClaimToken("replacement-owner");
             connection.setRefreshClaimedAt(NOW);
@@ -299,7 +340,7 @@ class CloudreveTokenServiceTest {
     void uncheckedRefreshFailureIsNormalizedAndReleasesItsClaim() {
         Fixture fixture = new Fixture();
         fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
-        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList()))
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class)))
                 .thenThrow(new IllegalStateException("decoder implementation failed"));
 
         assertThatThrownBy(fixture.service::validAccessToken)
@@ -315,7 +356,7 @@ class CloudreveTokenServiceTest {
     void invalidGrantRequiresReauthorizationAndClearsPersistedTokens() {
         Fixture fixture = new Fixture();
         fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
-        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList()))
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class)))
                 .thenThrow(new CloudreveOAuthClient.InvalidGrantException());
 
         assertThatThrownBy(fixture.service::validAccessToken)
@@ -329,7 +370,7 @@ class CloudreveTokenServiceTest {
     void transientRefreshFailureLeavesConnectionRetryable() {
         Fixture fixture = new Fixture();
         fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
-        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList()))
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class)))
                 .thenThrow(new CloudreveOAuthClient.OAuthUnavailableException("timeout"));
 
         assertThatThrownBy(fixture.service::validAccessToken)
@@ -439,20 +480,27 @@ class CloudreveTokenServiceTest {
         final CloudreveOAuthTransactionRepository transactionsRepository = new CloudreveOAuthTransactionRepository();
         final FakeTransactions transactions = new FakeTransactions();
         final FakeConnectionStore store = new FakeConnectionStore(KEY);
-        final CloudreveTokenService service = serviceWithKey(KEY);
+        final Clock clock;
+        final CloudreveTokenService service;
 
-        Fixture() { this(Duration.ofSeconds(2)); }
+        Fixture() { this(Duration.ofSeconds(2), Clock.fixed(NOW, ZoneOffset.UTC)); }
 
         Fixture(Duration requestTimeout) {
+            this(requestTimeout, Clock.fixed(NOW, ZoneOffset.UTC));
+        }
+
+        Fixture(Duration requestTimeout, Clock clock) {
+            this.clock = clock;
             properties.setRequestTimeout(requestTimeout);
             when(oauth.authorizationUri(anyString(), anyString())).thenAnswer(invocation ->
                     URI.create("https://cloud.example/session/authorize?state="
                             + java.net.URLEncoder.encode(invocation.getArgument(0), java.nio.charset.StandardCharsets.UTF_8)));
+            service = serviceWithKey(KEY);
         }
 
         CloudreveTokenService serviceWithKey(String key) {
             return new CloudreveTokenService(properties, store.repository, transactionsRepository, oauth,
-                    new CloudreveTokenCipher(key), transactions, Clock.fixed(NOW, ZoneOffset.UTC));
+                    new CloudreveTokenCipher(key), transactions, clock);
         }
 
         void stubSuccessfulAuthorization(String access, String refresh) {
@@ -482,6 +530,16 @@ class CloudreveTokenServiceTest {
             properties.setRequestTimeout(Duration.ofSeconds(2));
             return properties;
         }
+    }
+
+    private static final class MutableClock extends Clock {
+        private final AtomicReference<Instant> instant;
+
+        private MutableClock(Instant initial) { instant = new AtomicReference<>(initial); }
+        void advance(Duration duration) { instant.updateAndGet(value -> value.plus(duration)); }
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return Clock.fixed(instant(), zone); }
+        @Override public Instant instant() { return instant.get(); }
     }
 
     private static final class FakeConnectionStore {

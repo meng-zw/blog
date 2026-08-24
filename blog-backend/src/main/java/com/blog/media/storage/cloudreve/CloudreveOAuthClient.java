@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -103,6 +104,10 @@ public class CloudreveOAuthClient {
     }
 
     public TokenPair refresh(String refreshToken, List<String> existingScopes) {
+        return refresh(refreshToken, existingScopes, properties.getRequestTimeout());
+    }
+
+    TokenPair refresh(String refreshToken, List<String> existingScopes, Duration operationTimeout) {
         requireScopes(new LinkedHashSet<>(existingScopes));
         String body;
         try {
@@ -116,7 +121,7 @@ public class CloudreveOAuthClient {
                 .header("Accept", "application/json")
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8))
-                .build());
+                .build(), boundedTimeout(operationTimeout));
         if (envelope.path("code").asInt(-1) != 0) {
             if (isInvalidGrant(envelope)) throw new InvalidGrantException();
             throw new OAuthUnavailableException("Cloudreve refresh was rejected");
@@ -138,6 +143,10 @@ public class CloudreveOAuthClient {
     }
 
     private JsonNode send(HttpRequest request) {
+        return send(request, properties.getRequestTimeout());
+    }
+
+    private JsonNode send(HttpRequest request, Duration operationTimeout) {
         CompletableFuture<HttpResponse<byte[]>> operation;
         try {
             operation = httpClient.sendAsync(request, ignored -> new LimitedBodySubscriber(MAX_RESPONSE_BYTES));
@@ -146,7 +155,7 @@ public class CloudreveOAuthClient {
         }
         HttpResponse<byte[]> response;
         try {
-            response = operation.get(properties.getRequestTimeout().toNanos(), TimeUnit.NANOSECONDS);
+            response = operation.get(operationTimeout.toNanos(), TimeUnit.NANOSECONDS);
         } catch (TimeoutException exception) {
             operation.cancel(true);
             throw new OAuthUnavailableException("Cloudreve request timed out");
@@ -168,6 +177,14 @@ public class CloudreveOAuthClient {
             throw new OAuthUnavailableException("Cloudreve returned HTTP " + response.statusCode());
         }
         return json;
+    }
+
+    private Duration boundedTimeout(Duration requested) {
+        if (requested == null || requested.isZero() || requested.isNegative()) {
+            throw new OAuthUnavailableException("Cloudreve request deadline expired");
+        }
+        return requested.compareTo(properties.getRequestTimeout()) < 0
+                ? requested : properties.getRequestTimeout();
     }
 
     private JsonNode parseJson(byte[] bytes) {
