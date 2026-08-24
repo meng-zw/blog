@@ -7,6 +7,7 @@ import javax.imageio.ImageReader;
 import javax.imageio.stream.ImageInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Iterator;
@@ -76,6 +77,20 @@ public class MediaContentValidator {
             return ValidatedContent.attachment();
         }
         return validateImage(bytes, type);
+    }
+
+    /**
+     * Applies the same purpose-specific size ceiling to a streaming proxy upload without buffering it in memory.
+     * The returned stream reads one extra byte after the limit to distinguish an exact-limit file from an oversized one.
+     */
+    public InputStream limitProxyUpload(MediaPurpose purpose, String contentType, InputStream content) {
+        validatePurposeAndContentType(purpose, contentType);
+        if (content == null) {
+            throw new IllegalArgumentException("Uploaded media content is required");
+        }
+        String normalizedContentType = normalizeContentType(contentType);
+        return new LimitedInputStream(content, maximumBytes(purpose, normalizedContentType),
+                sizeMessage(purpose, normalizedContentType, maximumBytes(purpose, normalizedContentType)));
     }
 
     private FileType validatePurposeAndContentType(MediaPurpose purpose, String contentType) {
@@ -220,5 +235,52 @@ public class MediaContentValidator {
     }
 
     private record FileType(String extension, String imageIoFormat, byte[][] signatures) {
+    }
+
+    private static final class LimitedInputStream extends FilterInputStream {
+        private final long maximumBytes;
+        private final String oversizeMessage;
+        private long consumed;
+
+        private LimitedInputStream(InputStream input, long maximumBytes, String oversizeMessage) {
+            super(input);
+            this.maximumBytes = maximumBytes;
+            this.oversizeMessage = oversizeMessage;
+        }
+
+        @Override
+        public int read() throws IOException {
+            if (consumed >= maximumBytes) {
+                return readPastLimit();
+            }
+            int value = in.read();
+            if (value != -1) {
+                consumed++;
+            }
+            return value;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            if (length == 0) {
+                return 0;
+            }
+            if (consumed >= maximumBytes) {
+                return readPastLimit();
+            }
+            int allowed = (int) Math.min(length, maximumBytes - consumed);
+            int read = in.read(buffer, offset, allowed);
+            if (read != -1) {
+                consumed += read;
+            }
+            return read;
+        }
+
+        private int readPastLimit() throws IOException {
+            if (in.read() == -1) {
+                return -1;
+            }
+            throw new IllegalArgumentException(oversizeMessage);
+        }
     }
 }

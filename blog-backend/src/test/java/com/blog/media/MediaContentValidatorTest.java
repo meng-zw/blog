@@ -6,6 +6,7 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
@@ -127,6 +128,22 @@ class MediaContentValidatorTest {
                 .withMessage("Attachment signature does not match its declared type");
     }
 
+    @Test
+    void limitsProxyStreamsAtAttachmentAndZipBoundariesWithoutAllocatingFullFiles() throws Exception {
+        try (InputStream pdfAtLimit = validator.limitProxyUpload(MediaPurpose.ATTACHMENT, "application/pdf",
+                new RepeatingInputStream(20L * 1024 * 1024))) {
+            assertThat(pdfAtLimit.transferTo(java.io.OutputStream.nullOutputStream())).isEqualTo(20L * 1024 * 1024);
+        }
+        try (InputStream zipAtLimit = validator.limitProxyUpload(MediaPurpose.ATTACHMENT, "application/zip",
+                new RepeatingInputStream(50L * 1024 * 1024))) {
+            assertThat(zipAtLimit.transferTo(java.io.OutputStream.nullOutputStream())).isEqualTo(50L * 1024 * 1024);
+        }
+        InputStream tooLargePdf = validator.limitProxyUpload(MediaPurpose.ATTACHMENT, "application/pdf",
+                new RepeatingInputStream((20L * 1024 * 1024) + 1));
+        assertThatIllegalArgumentException().isThrownBy(() -> tooLargePdf.transferTo(java.io.OutputStream.nullOutputStream()))
+                .withMessage("Attachment must not exceed 20 MiB");
+    }
+
     private static MediaProperties properties() {
         return new MediaProperties();
     }
@@ -141,5 +158,33 @@ class MediaContentValidatorTest {
 
     private static byte[] pngSignature() {
         return new byte[]{(byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a};
+    }
+
+    private static final class RepeatingInputStream extends InputStream {
+        private long remaining;
+
+        private RepeatingInputStream(long remaining) {
+            this.remaining = remaining;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) {
+            if (remaining == 0) {
+                return -1;
+            }
+            int read = (int) Math.min(remaining, length);
+            java.util.Arrays.fill(buffer, offset, offset + read, (byte) 'x');
+            remaining -= read;
+            return read;
+        }
+
+        @Override
+        public int read() {
+            if (remaining == 0) {
+                return -1;
+            }
+            remaining--;
+            return 'x';
+        }
     }
 }

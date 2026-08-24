@@ -40,7 +40,10 @@ class PublicMediaControllerTest {
 
         mockMvc.perform(get("/api/media/assets/42").contextPath("/api"))
                 .andExpect(status().isFound())
-                .andExpect(header().string("Location", "https://cdn.example/inline-images/42.png"));
+                .andExpect(header().string("Location", "https://cdn.example/inline-images/42.png"))
+                .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")))
+                .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("immutable"))));
     }
 
     @Test

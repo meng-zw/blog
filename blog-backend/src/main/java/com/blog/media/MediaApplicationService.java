@@ -23,6 +23,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Locale;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -99,7 +100,8 @@ public class MediaApplicationService {
             throw new ConflictException("This media asset requires a direct upload");
         }
         try {
-            storage.upload(new ObjectUploadRequest(asset.getStorageKey(), asset.getContentType(), asset.getByteSize()), content);
+            InputStream limitedContent = contentValidator.limitProxyUpload(asset.getPurpose(), asset.getContentType(), content);
+            storage.upload(new ObjectUploadRequest(asset.getStorageKey(), asset.getContentType(), asset.getByteSize()), limitedContent);
         } catch (IOException exception) {
             throw new IllegalArgumentException("Unable to store uploaded media", exception);
         }
@@ -138,7 +140,7 @@ public class MediaApplicationService {
             throw new IllegalArgumentException("Unable to read stored media", exception);
         } catch (RuntimeException exception) {
             failUpload(asset, storage);
-            throw exception;
+            throw new IllegalArgumentException("Unable to verify stored media", exception);
         }
     }
 
@@ -178,19 +180,20 @@ public class MediaApplicationService {
     @Transactional
     public int abandonExpiredUploads() {
         Instant expiredBefore = clock.instant().minus(PENDING_EXPIRY);
-        int abandoned = 0;
+        int cleaned = 0;
+        List<MediaAsset> retryableAssets = mediaRepository.findByStatusIn(List.of(MediaStatus.ABANDONED, MediaStatus.FAILED));
         for (MediaAsset asset : mediaRepository.findByStatusAndCreatedAtBefore(MediaStatus.PENDING_UPLOAD, expiredBefore)) {
-            try {
-                storage(asset).delete(asset.getStorageKey());
-            } catch (IOException ignored) {
-                // The durable ABANDONED state ensures later cleanup may safely retry object removal.
-            }
+            deleteObjectBestEffort(asset);
             asset.setStatus(MediaStatus.ABANDONED);
             asset.setUpdatedAt(clock.instant());
             mediaRepository.save(asset);
-            abandoned++;
+            cleaned++;
         }
-        return abandoned;
+        for (MediaAsset asset : retryableAssets) {
+            deleteObjectBestEffort(asset);
+            cleaned++;
+        }
+        return cleaned;
     }
 
     private UploadTicket directTicket(ObjectStorage storage, ObjectUploadRequest request) {
@@ -216,12 +219,20 @@ public class MediaApplicationService {
     private void failUpload(MediaAsset asset, ObjectStorage storage) {
         try {
             storage.delete(asset.getStorageKey());
-        } catch (IOException ignored) {
+        } catch (IOException | RuntimeException ignored) {
             // A scheduled cleanup can retry storage cleanup, but clients must never observe a false READY state.
         }
         asset.setStatus(MediaStatus.FAILED);
         asset.setUpdatedAt(clock.instant());
         mediaRepository.save(asset);
+    }
+
+    private void deleteObjectBestEffort(MediaAsset asset) {
+        try {
+            storage(asset).delete(asset.getStorageKey());
+        } catch (IOException | RuntimeException ignored) {
+            // ABANDONED and FAILED remain eligible for the next cleanup run until their provider delete succeeds.
+        }
     }
 
     private MediaAsset ownedAsset(long mediaId, String username) {

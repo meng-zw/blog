@@ -11,7 +11,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.TimeUnit;
 
 /** Stable public media IDs redirect to the currently configured object provider. */
 @RestController
@@ -35,7 +34,7 @@ public class PublicMediaController {
 
     private static ResponseEntity<Void> redirect(MediaApplicationService.PublicMediaAsset asset, boolean download) {
         ResponseEntity.BodyBuilder response = ResponseEntity.status(HttpStatus.FOUND).location(asset.location())
-                .cacheControl(CacheControl.maxAge(365, TimeUnit.DAYS).cachePublic().immutable());
+                .cacheControl(CacheControl.noStore());
         if (download) {
             response.header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
                     .filename(asset.filename(), StandardCharsets.UTF_8).build().toString());

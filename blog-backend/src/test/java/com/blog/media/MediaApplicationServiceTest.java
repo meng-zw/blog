@@ -10,6 +10,7 @@ import com.blog.media.storage.ObjectStorageRegistry;
 import com.blog.media.storage.StoredObject;
 import com.blog.media.storage.UploadMode;
 import com.blog.media.storage.UploadTicket;
+import com.blog.shared.error.ResourceNotFoundException;
 import org.junit.jupiter.api.Test;
 
 import javax.imageio.ImageIO;
@@ -22,6 +23,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
+import java.io.IOException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -115,6 +117,20 @@ class MediaApplicationServiceTest {
     }
 
     @Test
+    void recordsFailedStateWhenStoredObjectIsMissing() throws Exception {
+        Fixture fixture = fixture(StorageProvider.LOCAL, false);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        when(fixture.mediaRepository.findByIdAndUploadedById(42L, 7L)).thenReturn(Optional.of(asset));
+        when(fixture.storage.inspect(asset.getStorageKey()))
+                .thenThrow(new ResourceNotFoundException("Media object", asset.getStorageKey()));
+
+        assertThatIllegalArgumentException().isThrownBy(() -> fixture.service.complete(42L, "owner"));
+
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.FAILED);
+        verify(fixture.mediaRepository).save(asset);
+    }
+
+    @Test
     void completesReadyMediaIdempotentlyWithoutReinspectingObject() {
         Fixture fixture = fixture(StorageProvider.LOCAL, false);
         MediaAsset asset = pendingAsset(42L, 7L);
@@ -151,6 +167,46 @@ class MediaApplicationServiceTest {
 
         assertThat(asset.getStatus()).isEqualTo(MediaStatus.ABANDONED);
         verify(fixture.storage).delete(asset.getStorageKey());
+    }
+
+    @Test
+    void retriesFailedDeletionForAbandonedUploadWithoutTouchingReadyMedia() throws Exception {
+        Fixture fixture = fixture(StorageProvider.LOCAL, false);
+        MediaAsset abandoned = pendingAsset(42L, 7L);
+        abandoned.setCreatedAt(NOW.minusSeconds(24 * 60 * 60 + 1));
+        MediaAsset ready = pendingAsset(43L, 7L);
+        ready.setStorageKey("inline-images/123e4567-e89b-12d3-a456-426614174001.png");
+        ready.setStatus(MediaStatus.READY);
+        when(fixture.mediaRepository.findByStatusAndCreatedAtBefore(eq(MediaStatus.PENDING_UPLOAD), any()))
+                .thenReturn(java.util.List.of(abandoned), java.util.List.of());
+        when(fixture.mediaRepository.findByStatusIn(java.util.List.of(MediaStatus.ABANDONED, MediaStatus.FAILED)))
+                .thenReturn(java.util.List.of(), java.util.List.of(abandoned));
+        org.mockito.Mockito.doThrow(new IOException("offline")).doNothing()
+                .when(fixture.storage).delete(abandoned.getStorageKey());
+
+        fixture.service.abandonExpiredUploads();
+        fixture.service.abandonExpiredUploads();
+
+        assertThat(abandoned.getStatus()).isEqualTo(MediaStatus.ABANDONED);
+        assertThat(ready.getStatus()).isEqualTo(MediaStatus.READY);
+        verify(fixture.storage, org.mockito.Mockito.times(2)).delete(abandoned.getStorageKey());
+        verify(fixture.storage, never()).delete(ready.getStorageKey());
+    }
+
+    @Test
+    void retriesFailedValidationObjectDeletionWithoutChangingFailedState() throws Exception {
+        Fixture fixture = fixture(StorageProvider.LOCAL, false);
+        MediaAsset failed = pendingAsset(42L, 7L);
+        failed.setStatus(MediaStatus.FAILED);
+        when(fixture.mediaRepository.findByStatusAndCreatedAtBefore(eq(MediaStatus.PENDING_UPLOAD), any()))
+                .thenReturn(java.util.List.of());
+        when(fixture.mediaRepository.findByStatusIn(java.util.List.of(MediaStatus.ABANDONED, MediaStatus.FAILED)))
+                .thenReturn(java.util.List.of(failed));
+
+        assertThat(fixture.service.abandonExpiredUploads()).isEqualTo(1);
+
+        assertThat(failed.getStatus()).isEqualTo(MediaStatus.FAILED);
+        verify(fixture.storage).delete(failed.getStorageKey());
     }
 
     @Test

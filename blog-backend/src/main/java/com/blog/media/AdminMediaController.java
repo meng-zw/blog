@@ -18,8 +18,8 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import jakarta.servlet.http.HttpServletRequest;
 
 /** Administrative transport layer for the provider-neutral media upload protocol. */
 @RestController
@@ -48,10 +48,14 @@ public class AdminMediaController {
     }
 
     @PutMapping("/uploads/{mediaId}/content")
-    public ResponseEntity<Void> uploadBinary(@PathVariable long mediaId, @RequestBody byte[] content,
-                                             Authentication authentication) {
-        mediaApplicationService.uploadProxyContent(mediaId, authentication.getName(), new ByteArrayInputStream(content));
-        return ResponseEntity.noContent().build();
+    public ResponseEntity<Void> uploadBinary(@PathVariable long mediaId, Authentication authentication,
+                                             HttpServletRequest request) {
+        try {
+            mediaApplicationService.uploadProxyContent(mediaId, authentication.getName(), request.getInputStream());
+            return ResponseEntity.noContent().build();
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Unable to read uploaded media", exception);
+        }
     }
 
     @PostMapping("/{mediaId}/complete")

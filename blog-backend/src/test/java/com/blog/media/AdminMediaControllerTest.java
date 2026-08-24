@@ -22,11 +22,13 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
 import java.util.Map;
+import java.io.InputStream;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -89,7 +91,8 @@ class AdminMediaControllerTest {
                 .andExpect(status().isNoContent());
         mockMvc.perform(post("/api/admin/media/42/complete").contextPath("/api").with(user("owner").roles("ADMIN")).with(csrf()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.url").value("/api/media/assets/42"));
-        verify(mediaApplicationService).uploadProxyContent(eq(42L), eq("owner"), any());
+        verify(mediaApplicationService).uploadProxyContent(eq(42L), eq("owner"),
+                argThat(stream -> !(stream instanceof java.io.ByteArrayInputStream)));
     }
 
     @Test

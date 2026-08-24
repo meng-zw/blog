@@ -11,4 +11,5 @@ public interface MediaAssetRepository extends JpaRepository<MediaAsset, Long> {
     Optional<MediaAsset> findByProviderAndBucketAndStorageKey(StorageProvider provider, String bucket, String storageKey);
     Optional<MediaAsset> findByIdAndUploadedById(Long id, Long uploadedById);
     List<MediaAsset> findByStatusAndCreatedAtBefore(MediaStatus status, Instant createdAt);
+    List<MediaAsset> findByStatusIn(List<MediaStatus> statuses);
 }
