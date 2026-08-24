@@ -140,6 +140,7 @@ public class R2ObjectStorage implements ObjectStorage {
                 .contentType(request.contentType())
                 .cacheControl(IMMUTABLE_CACHE_CONTROL)
                 .contentDisposition(contentDisposition(request.objectKey()))
+                .ifNoneMatch("*")
                 .build();
     }
 
@@ -147,7 +148,8 @@ public class R2ObjectStorage implements ObjectStorage {
         return Map.of(
                 "Content-Type", request.contentType(),
                 "Cache-Control", IMMUTABLE_CACHE_CONTROL,
-                "Content-Disposition", contentDisposition(request.objectKey()));
+                "Content-Disposition", contentDisposition(request.objectKey()),
+                "If-None-Match", "*");
     }
 
     private static String contentDisposition(String objectKey) {

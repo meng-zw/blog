@@ -200,8 +200,14 @@ public class MediaApplicationService {
     @Transactional(readOnly = true)
     public PublicMediaAsset resolvePublic(long mediaId) {
         MediaAsset asset = readyPublicAsset(mediaId);
-        return new PublicMediaAsset(storage(asset).resolvePublicUrl(location(asset)), asset.getContentType(),
-                asset.getOriginalFilename(), asset.getPurpose());
+        try {
+            return new PublicMediaAsset(storage(asset).resolvePublicUrl(location(asset)), asset.getContentType(),
+                    asset.getOriginalFilename(), asset.getPurpose());
+        } catch (ObjectStorageException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new ServiceUnavailableException("Media storage is temporarily unavailable", exception);
+        }
     }
 
     /**

@@ -13,7 +13,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import java.nio.charset.StandardCharsets;
 
-/** Stable public media IDs redirect to the currently configured object provider. */
+/** Stable public media endpoints preserve provider-neutral URLs and error responses. */
 @RestController
 @RequestMapping("/media/assets")
 public class PublicMediaController {

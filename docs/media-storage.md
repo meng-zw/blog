@@ -73,7 +73,8 @@ Compose 的 Nginx 入口将 `client_max_body_size` 设为 64 MiB，为后端 51 
     "AllowedHeaders": [
       "Content-Type",
       "Cache-Control",
-      "Content-Disposition"
+      "Content-Disposition",
+      "If-None-Match"
     ],
     "ExposeHeaders": ["ETag"],
     "MaxAgeSeconds": 86400
@@ -81,7 +82,7 @@ Compose 的 Nginx 入口将 `client_max_body_size` 设为 64 MiB，为后端 51 
 ]
 ```
 
-前端会原样使用上传计划要求的 `Content-Type`、`Cache-Control` 与 `Content-Disposition`。少一个 header 或 origin 不匹配，浏览器会在 PUT 前拦截请求。CORS 只允许上传；对象公开读取由自定义域处理，不需要把 R2 管理 endpoint 暴露给访客。
+前端会原样使用上传计划要求的 `Content-Type`、`Cache-Control`、`Content-Disposition` 与 `If-None-Match: *`。少一个 header 或 origin 不匹配，浏览器会在 PUT 前拦截请求。`If-None-Match: *` 是预签名请求的一部分；同一个上传 URL 被重放时，R2 会以条件冲突拒绝请求，而不会覆盖已经存在的对象。CORS 只允许上传；对象公开读取由自定义域处理，不需要把 R2 管理 endpoint 暴露给访客。
 
 ## 上传与访问行为
 
@@ -90,7 +91,7 @@ Compose 的 Nginx 入口将 `client_max_body_size` 设为 64 MiB，为后端 51 
 3. 浏览器调用 `POST /api/admin/media/{id}/complete`。服务先用短数据库事务将媒体从 `PENDING_UPLOAD` 原子认领为 `VERIFYING`，再在事务外验证对象，最后用第二个短事务将媒体置为 `READY`。重复 complete 是幂等的。
 4. Vditor 插入 `![名称](/api/media/assets/{id})`。公开读该地址会 302 到该媒体当前 provider 的公开地址；公开附件下载使用 `/api/media/assets/{id}/download`，并强制下载响应。附件下载只在短只读事务中复制 READY 媒体的位置与安全响应元数据，随后结束事务，再打开 provider 流并由 HTTP 流式响应负责关闭，避免慢下载占用数据库事务和连接。
 
-公开附件读取统一使用 provider-neutral 错误语义：Local/R2 已确认对象不存在返回 HTTP 404；适配器缺失、配置不可用、普通文件/网络 I/O 故障返回可重试 HTTP 503。公开 Problem Details 只包含通用文案，不暴露对象 key、桶名或本地文件系统路径；具体异常仅进入受控服务端日志。
+稳定图片地址与公开附件读取统一使用 provider-neutral 错误语义：Local/R2 已确认对象不存在返回 HTTP 404；适配器缺失、历史 bucket 配置不可用、普通文件/网络 I/O 故障返回可重试 HTTP 503。公开 Problem Details 只包含通用文案，不暴露 provider、对象 key、桶名、内部 URI 或本地文件系统路径；具体异常仅进入受控服务端日志。
 
 上传计划默认按“管理员账号 + 客户端 IP”每分钟最多 30 次，并最多跟踪 10000 个 key。该限流器是有界的单节点内存实现；单实例部署可直接使用。若横向扩展 API，发布前必须替换为 Redis 等共享限流实现，不能把每个节点各自的额度当成集群额度。
 
@@ -114,6 +115,10 @@ V8 以前的历史媒体可能没有 `uploaded_by_id`。仅当系统仍只有一
 不要在日志、截图、CI 输出、issue 或 `.env.example` 中记录 Secret Access Key。若 R2 故障，暂停后台上传；已发布媒体仍可由 CDN 缓存短暂提供，但不要将新的媒体标记为 READY，直到对象检查恢复。
 
 ## 迁移与切换 provider
+
+V13 使用存储生成的 SHA-256 `location_hash` 唯一标识 `(provider,bucket,storage_key)`，避免 MySQL/InnoDB 对 `utf8mb4` 长复合索引的 3072 字节限制。全新安装会直接执行已审查的 V9/V13 迁移，不需要修复 Flyway 历史。
+
+若某个已有安装已经把旧版 V9 checksum 记录在 `flyway_schema_history`，升级前必须先备份数据库，在非生产副本演练，然后部署成对审查过的 V9/V13 文件，运行一次 `flyway repair`，再执行迁移。`flyway repair` 只用于这次已确认的 V9 checksum 变更，不能在未核对迁移文件和备份的情况下重复或自动执行。
 
 稳定媒体 ID 是切换边界。对每条 `media_asset`，在目标 provider 写入对象、验证目标对象的 key、类型、大小和 ETag 后，再在同一数据库事务更新该记录的 `provider`、`bucket` 与 `storage_key`。只要 ID 不变，Markdown、封面和附件关系不变。
 

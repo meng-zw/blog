@@ -73,6 +73,23 @@ class R2ObjectStorageTest {
     }
 
     @Test
+    void createsDirectUploadsThatCannotOverwriteAnExistingObject() throws Exception {
+        S3Presigner presigner = mock(S3Presigner.class);
+        PresignedPutObjectRequest presigned = mock(PresignedPutObjectRequest.class);
+        when(presigned.url()).thenReturn(new URL("https://account.r2.cloudflarestorage.com/blog-media/inline-images/a.png?X-Amz-Signature=token"));
+        when(presigner.presignPutObject(any(PutObjectPresignRequest.class))).thenReturn(presigned);
+
+        UploadTicket ticket = storage(mock(S3Client.class), presigner)
+                .createDirectUpload(location("inline-images/a.png"),
+                        new ObjectUploadRequest("inline-images/a.png", "image/png", 7));
+
+        ArgumentCaptor<PutObjectPresignRequest> signedRequest = ArgumentCaptor.forClass(PutObjectPresignRequest.class);
+        verify(presigner).presignPutObject(signedRequest.capture());
+        assertThat(signedRequest.getValue().putObjectRequest().ifNoneMatch()).isEqualTo("*");
+        assertThat(ticket.requiredHeaders()).containsEntry("If-None-Match", "*");
+    }
+
+    @Test
     void inspectsTheAuthoritativeHeadMetadataAndMapsMissingObjects() {
         S3Client client = mock(S3Client.class);
         R2ObjectStorage storage = storage(client, mock(S3Presigner.class));

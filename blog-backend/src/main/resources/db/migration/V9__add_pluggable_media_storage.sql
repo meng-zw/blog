@@ -22,6 +22,6 @@ ALTER TABLE media_asset
     MODIFY COLUMN purpose VARCHAR(30) NOT NULL,
     MODIFY COLUMN updated_at DATETIME(6) NOT NULL,
     DROP INDEX uk_media_asset_storage_key,
-    ADD CONSTRAINT uk_media_asset_location UNIQUE (provider, bucket, storage_key),
+    ADD UNIQUE KEY uk_media_asset_location (provider, bucket(191), storage_key),
     ADD KEY idx_media_asset_status_created_at (status, created_at),
     ADD KEY idx_media_asset_uploaded_by_status (uploaded_by_id, status);

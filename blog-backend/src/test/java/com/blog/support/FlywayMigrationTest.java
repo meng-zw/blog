@@ -16,14 +16,14 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
     @Autowired DataSource dataSource;
 
     @Test
-    void migratesAnEmptyDatabaseToVersionTwelve() {
+    void migratesAnEmptyDatabaseToVersionThirteen() {
         var flyway = Flyway.configure().dataSource(dataSource).load();
         assertThat(flyway.info().current()).isNull();
 
         var result = flyway.migrate();
         assertThat(result.success).isTrue();
-        assertThat(result.migrationsExecuted).isEqualTo(12);
-        assertThat(result.targetSchemaVersion).isEqualTo("12");
+        assertThat(result.migrationsExecuted).isEqualTo(13);
+        assertThat(result.targetSchemaVersion).isEqualTo("13");
     }
 
     @Test
@@ -94,7 +94,7 @@ class FlywayMigrationTest extends MySqlIntegrationTest {
         var result = Flyway.configure().dataSource(dataSource).load().migrate();
 
         assertThat(result.success).isTrue();
-        assertThat(result.migrationsExecuted).isEqualTo(4);
+        assertThat(result.migrationsExecuted).isEqualTo(5);
         var migrated = jdbc.queryForMap("""
                 SELECT provider, bucket, status, purpose
                 FROM media_asset
