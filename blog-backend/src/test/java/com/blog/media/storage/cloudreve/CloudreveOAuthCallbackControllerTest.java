@@ -24,11 +24,11 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -36,7 +36,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(controllers = CloudreveOAuthCallbackController.class)
 @ContextConfiguration(classes = {CloudreveOAuthCallbackController.class, SecurityConfig.class, AdminUserDetailsService.class,
-        LoginAttemptService.class, TraceIdFilter.class, GlobalExceptionHandler.class})
+        LoginAttemptService.class, TraceIdFilter.class, CloudreveOAuthCallbackSecurityHeadersFilter.class,
+        GlobalExceptionHandler.class})
 @ImportAutoConfiguration(ServletWebServerFactoryAutoConfiguration.class)
 @ActiveProfiles("test")
 class CloudreveOAuthCallbackControllerTest {
@@ -51,7 +52,15 @@ class CloudreveOAuthCallbackControllerTest {
 
         mockMvc.perform(get("/api/admin/media/cloudreve/callback").contextPath("/api")
                         .param("code", "authorization-code").param("state", "server-state"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("Referrer-Policy", "no-referrer"))
+                .andExpect(header().string("Cache-Control", "no-store"));
+        mockMvc.perform(get("/api/admin/media/cloudreve/callback").contextPath("/api")
+                        .with(user("reader").roles("USER"))
+                        .param("code", "authorization-code").param("state", "server-state"))
+                .andExpect(status().isForbidden())
+                .andExpect(header().string("Referrer-Policy", "no-referrer"))
+                .andExpect(header().string("Cache-Control", "no-store"));
         MockHttpSession wrongSession = new MockHttpSession();
         doThrow(new CloudreveAuthorizationRequiredException()).when(tokenService)
                 .completeAuthorization(eq("authorization-code"), eq("server-state"), eq(7L), eq(wrongSession.getId()));
@@ -70,6 +79,21 @@ class CloudreveOAuthCallbackControllerTest {
                 .andExpect(header().string("Referrer-Policy", "no-referrer"))
                 .andExpect(header().string("Cache-Control", "no-store"));
         verify(tokenService).completeAuthorization("authorization-code", "server-state", 7L, session.getId());
+    }
+
+    @Test
+    void callbackHeadersDoNotDependOnOAuthPropertyBindingBeforeAuthentication() throws Exception {
+        mockMvc.perform(get("/api/admin/media/cloudreve/callback").contextPath("/api"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("Referrer-Policy", "no-referrer"))
+                .andExpect(header().string("Cache-Control", "no-store"));
+    }
+
+    @Test
+    void earlyLeakPreventionHeadersAreScopedToTheActualCallbackPath() throws Exception {
+        mockMvc.perform(get("/api/admin/media/cloudreve/not-the-callback").contextPath("/api"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string("Referrer-Policy", "same-origin"));
     }
 
     @Test

@@ -20,8 +20,9 @@ import java.util.UUID;
 
 /** OAuth callback that consumes an authorization transaction bound to the initiating administrator session. */
 @RestController
-@RequestMapping("/admin/media/cloudreve/callback")
+@RequestMapping(CloudreveOAuthCallbackController.CALLBACK_PATH)
 public class CloudreveOAuthCallbackController {
+    static final String CALLBACK_PATH = "/admin/media/cloudreve/callback";
     private static final Logger log = LoggerFactory.getLogger(CloudreveOAuthCallbackController.class);
     private static final String CONNECTED_REDIRECT = "/admin/settings?cloudreve=connected";
     private static final String AUTHORIZATION_FAILED_REDIRECT = "/admin/settings?cloudreve=authorization_failed";

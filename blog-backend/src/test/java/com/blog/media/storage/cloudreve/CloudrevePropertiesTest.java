@@ -1,6 +1,8 @@
 package com.blog.media.storage.cloudreve;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import java.net.URI;
@@ -119,6 +121,15 @@ class CloudrevePropertiesTest {
         new ApplicationContextRunner()
                 .withUserConfiguration(CloudreveConfiguration.class)
                 .withPropertyValues("blog.media.provider=local", "blog.media.cloudreve.enabled=true")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"on", "yes", "1"})
+    void requiresCompleteCloudreveConfigurationForEverySpringBooleanEnabledValue(String enabled) {
+        new ApplicationContextRunner()
+                .withUserConfiguration(CloudreveConfiguration.class)
+                .withPropertyValues("blog.media.provider=local", "blog.media.cloudreve.enabled=" + enabled)
                 .run(context -> assertThat(context).hasFailed());
     }
 

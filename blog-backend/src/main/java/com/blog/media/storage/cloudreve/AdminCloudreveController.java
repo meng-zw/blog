@@ -83,7 +83,6 @@ public class AdminCloudreveController {
     }
 
     private boolean isEffectivelyConfigured() {
-        return CloudreveConfiguration.isEffectivelyConfigured(properties.isEnabled(),
-                environment.getProperty("blog.media.provider"));
+        return CloudreveConfiguration.isEffectivelyConfigured(environment);
     }
 }

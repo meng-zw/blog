@@ -1,12 +1,14 @@
 package com.blog.media.storage.cloudreve;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Condition;
 import org.springframework.context.annotation.ConditionContext;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.type.AnnotatedTypeMetadata;
+import org.springframework.core.env.Environment;
 
 /** Registers Cloudreve configuration without coupling its read capability to the default upload provider. */
 @Configuration(proxyBeanMethods = false)
@@ -26,14 +28,13 @@ public class CloudreveConfiguration {
     static final class CloudreveRequiredConfigurationCondition implements Condition {
         @Override
         public boolean matches(ConditionContext context, AnnotatedTypeMetadata metadata) {
-            String provider = context.getEnvironment().getProperty("blog.media.provider");
-            boolean enabled = Boolean.parseBoolean(
-                    context.getEnvironment().getProperty("blog.media.cloudreve.enabled", "false"));
-            return isEffectivelyConfigured(enabled, provider);
+            return isEffectivelyConfigured(context.getEnvironment());
         }
     }
 
-    static boolean isEffectivelyConfigured(boolean enabled, String provider) {
+    static boolean isEffectivelyConfigured(Environment environment) {
+        boolean enabled = Binder.get(environment).bind("blog.media.cloudreve.enabled", Boolean.class).orElse(false);
+        String provider = environment.getProperty("blog.media.provider");
         return enabled || "cloudreve".equalsIgnoreCase(provider == null ? "" : provider.trim());
     }
 }

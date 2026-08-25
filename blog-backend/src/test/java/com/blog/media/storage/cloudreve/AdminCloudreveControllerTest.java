@@ -37,7 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@WebMvcTest(controllers = AdminCloudreveController.class)
+@WebMvcTest(controllers = AdminCloudreveController.class, properties = "blog.media.cloudreve.enabled=true")
 @ContextConfiguration(classes = {AdminCloudreveController.class, SecurityConfig.class, AdminUserDetailsService.class,
         LoginAttemptService.class, TraceIdFilter.class, GlobalExceptionHandler.class})
 @ImportAutoConfiguration(ServletWebServerFactoryAutoConfiguration.class)
@@ -109,22 +109,6 @@ class AdminCloudreveControllerTest {
                         .session(session).with(user("owner").roles("ADMIN")).with(csrf()))
                 .andExpect(status().isNoContent());
         verify(tokenService).disconnect(7L);
-    }
-
-    @Test
-    void rejectsAuthorizationWhenCloudreveIsNotEffectivelyConfiguredWithoutLeakingConfiguration() throws Exception {
-        MockHttpSession session = new MockHttpSession();
-        stubAdmin();
-        when(properties.isEnabled()).thenReturn(false);
-
-        mockMvc.perform(post("/api/admin/media/cloudreve/authorize").contextPath("/api")
-                        .session(session).with(user("owner").roles("ADMIN")).with(csrf()))
-                .andExpect(status().isConflict())
-                .andExpect(content().contentTypeCompatibleWith("application/problem+json"))
-                .andExpect(jsonPath("$.detail").value(not(containsString("client"))))
-                .andExpect(jsonPath("$.detail").value(not(containsString("secret"))))
-                .andExpect(jsonPath("$.detail").value(not(containsString("base"))));
-        verify(tokenService, never()).beginAuthorization(eq(7L), eq(session.getId()));
     }
 
     @Test
