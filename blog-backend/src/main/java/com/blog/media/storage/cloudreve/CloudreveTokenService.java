@@ -9,6 +9,8 @@ import org.springframework.transaction.support.TransactionOperations;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
@@ -153,6 +155,37 @@ public class CloudreveTokenService {
                 }
             }
         }
+    }
+
+    /**
+     * Returns a token after an authenticated API request rejected the supplied token.
+     * The stored token is invalidated only when it is still the rejected value, so a
+     * concurrent refresh cannot be overwritten or needlessly repeated.
+     */
+    public String validAccessTokenAfterRejection(String rejectedAccessToken) {
+        ensureCipher();
+        if (rejectedAccessToken == null || rejectedAccessToken.isBlank()) {
+            throw new IllegalArgumentException("Rejected Cloudreve access token is required");
+        }
+        database.executeWithoutResult(status -> {
+            CloudreveConnection connection = connections.findSingletonForUpdate()
+                    .orElseThrow(CloudreveAuthorizationRequiredException::new);
+            if (connection.getStatus() == CloudreveConnectionStatus.DISCONNECTED
+                    || connection.getStatus() == CloudreveConnectionStatus.REAUTH_REQUIRED) {
+                throw new CloudreveAuthorizationRequiredException();
+            }
+            if (connection.getStatus() != CloudreveConnectionStatus.CONNECTED) return;
+            try {
+                if (sameToken(decrypt(connection, "access"), rejectedAccessToken)) {
+                    connection.setAccessTokenExpiresAt(Instant.EPOCH);
+                    connections.saveAndFlush(connection);
+                }
+            } catch (CloudreveTokenCipher.TokenDecryptionException exception) {
+                requireReauthorization(connection);
+                throw new CloudreveAuthorizationRequiredException();
+            }
+        });
+        return validAccessToken();
     }
 
     public void disconnect(long adminId) {
@@ -367,6 +400,10 @@ public class CloudreveTokenService {
         byte[] random = new byte[bytes];
         RANDOM.nextBytes(random);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(random);
+    }
+
+    private static boolean sameToken(String left, String right) {
+        return MessageDigest.isEqual(left.getBytes(StandardCharsets.UTF_8), right.getBytes(StandardCharsets.UTF_8));
     }
 
     private static void requireAdmin(long adminId) {

@@ -1,0 +1,24 @@
+{
+  "code": 0,
+  "data": {
+    "session_id": "session-example",
+    "upload_id": "upload-example",
+    "chunk_size": 3,
+    "expires": 2000000000,
+    "upload_urls": [
+      "{{PROVIDER_ORIGIN}}/multipart/part-0",
+      "{{PROVIDER_ORIGIN}}/multipart/part-1"
+    ],
+    "completeURL": "{{PROVIDER_ORIGIN}}/multipart/complete",
+    "storage_policy": {
+      "id": "policy-example",
+      "name": "S3-compatible",
+      "type": "s3",
+      "max_size": 0,
+      "chunk_concurrency": 1
+    },
+    "uri": "cloudreve://my/blog/inline-images/2026/08/example.png",
+    "callback_secret": "callback-example"
+  },
+  "msg": ""
+}

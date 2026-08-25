@@ -1,0 +1,18 @@
+{
+  "code": 0,
+  "data": {
+    "type": 0,
+    "id": "file-example",
+    "name": "example.png",
+    "created_at": "2026-08-24T10:00:00Z",
+    "updated_at": "2026-08-24T10:00:01Z",
+    "size": 5,
+    "metadata": {
+      "blog:mime_type": "image/png"
+    },
+    "path": "cloudreve://my/blog/inline-images/2026/08/example.png",
+    "owned": true,
+    "primary_entity": "entity-example"
+  },
+  "msg": ""
+}

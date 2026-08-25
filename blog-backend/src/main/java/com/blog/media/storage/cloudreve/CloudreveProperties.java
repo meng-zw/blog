@@ -4,7 +4,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 
 /** Server-only Cloudreve OAuth and file-space settings. */
 @ConfigurationProperties(prefix = "blog.media.cloudreve")
@@ -23,6 +25,7 @@ public class CloudreveProperties {
     private boolean allowTrustedInternalHttp;
     private Duration connectTimeout = Duration.ofSeconds(5);
     private Duration requestTimeout = Duration.ofSeconds(30);
+    private List<URI> providerOrigins = new ArrayList<>();
 
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
@@ -54,6 +57,10 @@ public class CloudreveProperties {
     public void setConnectTimeout(Duration connectTimeout) { this.connectTimeout = connectTimeout; }
     public Duration getRequestTimeout() { return requestTimeout; }
     public void setRequestTimeout(Duration requestTimeout) { this.requestTimeout = requestTimeout; }
+    public List<URI> getProviderOrigins() { return List.copyOf(providerOrigins); }
+    public void setProviderOrigins(List<URI> providerOrigins) {
+        this.providerOrigins = providerOrigins == null ? new ArrayList<>() : new ArrayList<>(providerOrigins);
+    }
 
     public URI authorizationUri() { return overrideOrResolve(authorizationUri, "/session/authorize"); }
     public URI tokenUri() { return overrideOrResolve(tokenUri, "/api/v4/session/oauth/token"); }
@@ -78,6 +85,9 @@ public class CloudreveProperties {
         validateTimeout(connectTimeout, "Cloudreve connect timeout");
         validateTimeout(requestTimeout, "Cloudreve request timeout");
         validateRootPath(rootPath);
+        for (URI providerOrigin : providerOrigins) {
+            validateProviderOrigin(providerOrigin);
+        }
     }
 
     private URI overrideOrResolve(URI override, String defaultPath) {
@@ -140,6 +150,14 @@ public class CloudreveProperties {
             if ("..".equals(segment) || ".".equals(segment)) {
                 throw new IllegalArgumentException("Cloudreve root path must not contain traversal segments");
             }
+        }
+    }
+
+    private void validateProviderOrigin(URI uri) {
+        validateUri(uri, "Cloudreve provider origin");
+        String path = uri.getRawPath();
+        if ((path != null && !path.isEmpty() && !"/".equals(path)) || uri.getRawQuery() != null) {
+            throw new IllegalArgumentException("Cloudreve provider origin must contain only scheme, host, and port");
         }
     }
 

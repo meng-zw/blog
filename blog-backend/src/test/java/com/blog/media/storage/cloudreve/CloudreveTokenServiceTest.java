@@ -171,6 +171,31 @@ class CloudreveTokenServiceTest {
     }
 
     @Test
+    void refreshesAnOtherwiseUnexpiredAccessTokenAfterTheApiRejectsIt() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("rejected-access", "refresh", NOW.plusSeconds(600), NOW.plusSeconds(1200));
+        when(fixture.oauth.refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class)))
+                .thenReturn(fixture.pair("replacement-access", "rotated-refresh"));
+
+        assertThat(fixture.service.validAccessTokenAfterRejection("rejected-access"))
+                .isEqualTo("replacement-access");
+
+        assertThat(fixture.decrypt(fixture.store.connection.get(), "access")).isEqualTo("replacement-access");
+        verify(fixture.oauth, times(1)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class));
+    }
+
+    @Test
+    void rejectionOfAnOlderTokenDoesNotInvalidateAConcurrentReplacement() {
+        Fixture fixture = new Fixture();
+        fixture.store.connected("replacement-access", "refresh", NOW.plusSeconds(600), NOW.plusSeconds(1200));
+
+        assertThat(fixture.service.validAccessTokenAfterRejection("older-rejected-access"))
+                .isEqualTo("replacement-access");
+
+        verify(fixture.oauth, times(0)).refresh(anyString(), org.mockito.ArgumentMatchers.anyList(), any(Duration.class));
+    }
+
+    @Test
     void refreshesOutsideTheDatabaseTransactionAndPersistsRotatedPair() {
         Fixture fixture = new Fixture();
         fixture.store.connected("old-access", "old-refresh", NOW.minusSeconds(1), NOW.plusSeconds(1200));
