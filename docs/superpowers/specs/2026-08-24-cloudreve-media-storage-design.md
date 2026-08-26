@@ -46,10 +46,10 @@ blog:
       refresh-uri: ${BLOG_MEDIA_CLOUDREVE_REFRESH_URI:}
       userinfo-uri: ${BLOG_MEDIA_CLOUDREVE_USERINFO_URI:}
       redirect-uri: ${BLOG_MEDIA_CLOUDREVE_REDIRECT_URI:}
-      client-id: ${BLOG_MEDIA_CLOUDREVE_CLIENT_ID:}
-      client-secret: ${BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET:}
+      client-id: ${BLOG_MEDIA_CLOUDREVE_CLIENT_ID}
+      client-secret: ${BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET}
       root-path: ${BLOG_MEDIA_CLOUDREVE_ROOT_PATH:/blog}
-      token-encryption-key: ${BLOG_MEDIA_TOKEN_ENCRYPTION_KEY:}
+      token-encryption-key: ${BLOG_MEDIA_TOKEN_ENCRYPTION_KEY}
 ```
 
 `base-url` 为端点提供默认来源，其余 URI 可独立覆盖，以支持变更域名、端口和反向代理路径。生产配置只通过主机 `.env`、容器 Secret 或密钥管理系统注入 API 容器。前端构建、Nginx 容器、示例配置和日志不得包含 Client Secret、Token 或加密密钥。

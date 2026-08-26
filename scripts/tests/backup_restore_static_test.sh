@@ -42,15 +42,27 @@ normalize_cloudreve_value() {
   printf '%s' "$value"
 }
 
-# An assigned credential must be absent, an entire Compose/Spring variable
-# reference, or an entire documentation placeholder. Prefix matching is
-# deliberately unsafe because it permits `${SECRET}leaked-value`.
+# An assigned credential must be absent, an entire bare shell variable
+# reference, or the exact uppercase documentation marker `<PLACEHOLDER>`.
+# Prefixes, fallback/default operators, and arbitrary angle-bracket text are
+# deliberately unsafe because they can carry concrete credential material.
 is_allowed_cloudreve_credential_value() {
-  local value variable_reference_pattern placeholder_pattern
+  local value variable_reference_pattern nocasematch_was_enabled=0 allowed=1
   value=$(normalize_cloudreve_value "$1")
-  variable_reference_pattern='^\$\{[^}]+\}$'
-  placeholder_pattern='^<[^<>]+>$'
-  [[ -z "$value" || "$value" =~ $variable_reference_pattern || "$value" =~ $placeholder_pattern ]]
+  variable_reference_pattern='^\$\{[A-Za-z_][A-Za-z0-9_]*\}$'
+  # The scanner enables nocasematch to parse mixed-case keys. Temporarily turn
+  # it off here so `<PLACEHOLDER>` remains an intentionally exact marker.
+  if shopt -q nocasematch; then
+    nocasematch_was_enabled=1
+    shopt -u nocasematch
+  fi
+  if [[ -z "$value" || "$value" =~ $variable_reference_pattern || "$value" == '<PLACEHOLDER>' ]]; then
+    allowed=0
+  fi
+  if (( nocasematch_was_enabled )); then
+    shopt -s nocasematch
+  fi
+  return "$allowed"
 }
 
 is_private_cloudreve_endpoint() {
@@ -183,7 +195,14 @@ for variable in \
   BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET \
   BLOG_MEDIA_CLOUDREVE_POLICY_ID \
   BLOG_MEDIA_TOKEN_ENCRYPTION_KEY; do
-  grep -Fq "$variable: \${$variable:-}" "$compose_file"
+  case "$variable" in
+    BLOG_MEDIA_CLOUDREVE_CLIENT_ID|BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET|BLOG_MEDIA_CLOUDREVE_POLICY_ID|BLOG_MEDIA_TOKEN_ENCRYPTION_KEY)
+      grep -Fq "$variable: \${$variable}" "$compose_file"
+      ;;
+    *)
+      grep -Fq "$variable: \${$variable:-}" "$compose_file"
+      ;;
+  esac
   grep -q "^$variable=" "$production_env"
 done
 grep -Eq '^BLOG_MEDIA_CLOUDREVE_CLIENT_ID=$' "$production_env"
@@ -256,6 +275,9 @@ appended_placeholder_fixture="$fixture_dir/compose-appended-placeholder.yml"
 mixed_case_secret_fixture="$fixture_dir/compose-mixed-case-secret.yml"
 mixed_case_ip_fixture="$fixture_dir/compose-mixed-case-private-ip.yml"
 mixed_case_placeholder_fixture="$fixture_dir/compose-mixed-case-placeholder.yml"
+bare_variable_fixture="$fixture_dir/compose-bare-variable.yml"
+fallback_variable_fixture="$fixture_dir/compose-fallback-variable.yml"
+concrete_angle_fixture="$fixture_dir/compose-concrete-angle-token.yml"
 printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: supplied-client-secret' > "$secret_fixture"
 printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_BASE_URL: http://192.168.10.20:5212' > "$ip_fixture"
 printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_BASE_URL: "http://192.168.10.20:5212"' > "$quoted_ip_fixture"
@@ -268,6 +290,9 @@ printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: <PLACEHOLDER>suffix' > "$appe
 printf '%s\n' 'Client-Secret: supplied-client-secret' > "$mixed_case_secret_fixture"
 printf '%s\n' 'BLOG_media_cloudreve_base_url: "http://192.168.10.20:5212"' > "$mixed_case_ip_fixture"
 printf '%s\n' 'Client-Secret: "${SECRET}"' > "$mixed_case_placeholder_fixture"
+printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: ${SECRET}' > "$bare_variable_fixture"
+printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: ${SECRET:-leak}' > "$fallback_variable_fixture"
+printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: <supplied-client-secret>' > "$concrete_angle_fixture"
 assert_cloudreve_scan_rejects "$secret_fixture" 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET'
 assert_cloudreve_scan_rejects "$ip_fixture" 'BLOG_MEDIA_CLOUDREVE_BASE_URL'
 assert_cloudreve_scan_rejects "$quoted_ip_fixture" 'BLOG_MEDIA_CLOUDREVE_BASE_URL'
@@ -280,6 +305,9 @@ assert_cloudreve_scan_rejects "$appended_placeholder_fixture" 'BLOG_MEDIA_CLOUDR
 assert_cloudreve_scan_rejects "$mixed_case_secret_fixture" 'Client-Secret'
 assert_cloudreve_scan_rejects "$mixed_case_ip_fixture" 'BLOG_media_cloudreve_base_url'
 assert_cloudreve_scan_allows "$mixed_case_placeholder_fixture"
+assert_cloudreve_scan_allows "$bare_variable_fixture"
+assert_cloudreve_scan_rejects "$fallback_variable_fixture" 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET'
+assert_cloudreve_scan_rejects "$concrete_angle_fixture" 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET'
 grep -Fq 'Cloudreve/storage-policy backup' "$repo_dir/docs/cloudreve-media.md"
 grep -Fq 'retention/PITR' "$repo_dir/docs/cloudreve-media.md"
 grep -Fq 'post-restore reconciliation' "$repo_dir/docs/cloudreve-media.md"
