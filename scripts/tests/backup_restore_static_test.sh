@@ -23,21 +23,69 @@ assert_rejected() {
   }
 }
 
+# Normalizes a YAML/.env assignment value. Quotes are removed only when they
+# wrap the complete value, so `${SECRET}suffix` cannot be mistaken for an
+# indirection merely because it starts with a variable reference.
+normalize_cloudreve_value() {
+  local value=$1 first last
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  if [[ ${#value} -ge 2 ]]; then
+    first=${value:0:1}
+    last=${value: -1}
+    if [[ ( "$first" == '"' && "$last" == '"' ) || ( "$first" == "'" && "$last" == "'" ) ]]; then
+      value=${value:1:${#value}-2}
+    fi
+  fi
+  printf '%s' "$value"
+}
+
+# An assigned credential must be absent, an entire Compose/Spring variable
+# reference, or an entire documentation placeholder. Prefix matching is
+# deliberately unsafe because it permits `${SECRET}leaked-value`.
+is_allowed_cloudreve_credential_value() {
+  local value variable_reference_pattern placeholder_pattern
+  value=$(normalize_cloudreve_value "$1")
+  variable_reference_pattern='^\$\{[^}]+\}$'
+  placeholder_pattern='^<[^<>]+>$'
+  [[ -z "$value" || "$value" =~ $variable_reference_pattern || "$value" =~ $placeholder_pattern ]]
+}
+
+is_private_cloudreve_endpoint() {
+  local value
+  value=$(normalize_cloudreve_value "$1")
+  printf '%s\n' "$value" | rg --pcre2 -q '^https?://(10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}|192\.168\.(?:[0-9]{1,3}\.)[0-9]{1,3}|172\.(?:1[6-9]|2[0-9]|3[0-1])\.(?:[0-9]{1,3}\.)[0-9]{1,3})(?::[0-9]{1,5})?(?:[/?#]|$)'
+}
+
 # Returns success and prints a finding when a tracked Cloudreve deployment or
 # configuration source contains a concrete credential or private-IP endpoint.
-# `${...}` values are Compose/Spring indirection, not credential material.
+# It parses each assignment value and only allows whole-value `${...}` or
+# `<...>` placeholders; Compose/Spring indirection may not have a suffix.
 scan_cloudreve_configuration() {
-  local credential_pattern endpoint_pattern findings
-  credential_pattern='(?i)(BLOG_MEDIA_CLOUDREVE_(CLIENT_ID|CLIENT_SECRET|POLICY_ID)|BLOG_MEDIA_TOKEN_ENCRYPTION_KEY|client-id|client-secret|policy-id|token-encryption-key)[[:space:]]*[:=]'
-  endpoint_pattern='(?i)(BLOG_MEDIA_CLOUDREVE_(BASE_URL|AUTHORIZATION_URI|TOKEN_URI|REFRESH_URI|USERINFO_URI|REDIRECT_URI)|base-url|authorization-uri|token-uri|refresh-uri|userinfo-uri|redirect-uri)[[:space:]]*[:=][[:space:]]*https?://(10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}|192\.168\.(?:[0-9]{1,3}\.)[0-9]{1,3}|172\.(?:1[6-9]|2[0-9]|3[0-1])\.(?:[0-9]{1,3}\.)[0-9]{1,3})(?::[0-9]{1,5})?'
-  findings=$(rg --pcre2 -n -- "$credential_pattern" "$@" 2>/dev/null || true)
-  findings=$(printf '%s\n' "$findings" | rg -v '[:=][[:space:]]*(\$\{|$|<[^>]+>)' || true)
-  if [[ -n "$findings" ]]; then
-    printf '%s\n' "$findings"
-    return 0
-  fi
-  if rg --pcre2 -n -- "$endpoint_pattern" "$@"; then return 0; fi
-  return 1
+  local assignment_pattern assignment_content_pattern findings file line content key value
+  assignment_pattern='(?i)^[[:space:]]*(BLOG_MEDIA_CLOUDREVE_(BASE_URL|AUTHORIZATION_URI|TOKEN_URI|REFRESH_URI|USERINFO_URI|REDIRECT_URI|CLIENT_ID|CLIENT_SECRET|POLICY_ID)|BLOG_MEDIA_TOKEN_ENCRYPTION_KEY|base-url|authorization-uri|token-uri|refresh-uri|userinfo-uri|redirect-uri|client-id|client-secret|policy-id|token-encryption-key)[[:space:]]*[:=]'
+  assignment_content_pattern='^[[:space:]]*(BLOG_MEDIA_CLOUDREVE_(BASE_URL|AUTHORIZATION_URI|TOKEN_URI|REFRESH_URI|USERINFO_URI|REDIRECT_URI|CLIENT_ID|CLIENT_SECRET|POLICY_ID)|BLOG_MEDIA_TOKEN_ENCRYPTION_KEY|base-url|authorization-uri|token-uri|refresh-uri|userinfo-uri|redirect-uri|client-id|client-secret|policy-id|token-encryption-key)[[:space:]]*[:=][[:space:]]*(.*)$'
+  findings=''
+  while IFS=: read -r file line content; do
+    [[ "$content" =~ $assignment_content_pattern ]] || continue
+    key=${BASH_REMATCH[1]}
+    value=${BASH_REMATCH[3]}
+    case "$key" in
+      BLOG_MEDIA_CLOUDREVE_CLIENT_ID|BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET|BLOG_MEDIA_CLOUDREVE_POLICY_ID|BLOG_MEDIA_TOKEN_ENCRYPTION_KEY|client-id|client-secret|policy-id|token-encryption-key)
+        if ! is_allowed_cloudreve_credential_value "$value"; then
+          findings+="${findings:+$'\n'}$file:$line:$content"
+        fi
+        ;;
+      *)
+        if is_private_cloudreve_endpoint "$value"; then
+          findings+="${findings:+$'\n'}$file:$line:$content"
+        fi
+        ;;
+    esac
+  done < <(rg --pcre2 -n --with-filename --no-heading -- "$assignment_pattern" "$@" 2>/dev/null || true)
+  [[ -n "$findings" ]] || return 1
+  printf '%s\n' "$findings"
+  return 0
 }
 
 assert_cloudreve_scan_rejects() {
@@ -49,6 +97,14 @@ assert_cloudreve_scan_rejects() {
     }
   else
     printf 'expected Cloudreve scan to reject fixture: %s\n' "$fixture" >&2
+    exit 1
+  fi
+}
+
+assert_cloudreve_scan_allows() {
+  local fixture=$1 output
+  if output=$(scan_cloudreve_configuration "$fixture"); then
+    printf 'expected Cloudreve scan to allow fixture %s, got: %s\n' "$fixture" "$output" >&2
     exit 1
   fi
 }
@@ -179,10 +235,19 @@ fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/cloudreve-static-contract.XXXXXX")
 trap 'rm -rf "$fixture_dir"' EXIT
 secret_fixture="$fixture_dir/compose-secret.yml"
 ip_fixture="$fixture_dir/compose-private-ip.yml"
+quoted_ip_fixture="$fixture_dir/compose-quoted-private-ip.yml"
+appended_secret_fixture="$fixture_dir/compose-appended-secret.yml"
+quoted_placeholder_fixture="$fixture_dir/compose-quoted-placeholder.yml"
 printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: supplied-client-secret' > "$secret_fixture"
 printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_BASE_URL: http://192.168.10.20:5212' > "$ip_fixture"
+printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_BASE_URL: "http://192.168.10.20:5212"' > "$quoted_ip_fixture"
+printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: ${SECRET}leaked-value' > "$appended_secret_fixture"
+printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: "${SECRET}"' > "$quoted_placeholder_fixture"
 assert_cloudreve_scan_rejects "$secret_fixture" 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET'
 assert_cloudreve_scan_rejects "$ip_fixture" 'BLOG_MEDIA_CLOUDREVE_BASE_URL'
+assert_cloudreve_scan_rejects "$quoted_ip_fixture" 'BLOG_MEDIA_CLOUDREVE_BASE_URL'
+assert_cloudreve_scan_rejects "$appended_secret_fixture" 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET'
+assert_cloudreve_scan_allows "$quoted_placeholder_fixture"
 grep -Fq 'Cloudreve/storage-policy backup' "$repo_dir/docs/cloudreve-media.md"
 grep -Fq 'retention/PITR' "$repo_dir/docs/cloudreve-media.md"
 grep -Fq 'post-restore reconciliation' "$repo_dir/docs/cloudreve-media.md"
