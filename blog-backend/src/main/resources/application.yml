@@ -9,8 +9,8 @@ spring:
     time-zone: Asia/Shanghai
   servlet:
     multipart:
-      max-file-size: 50MiB
-      max-request-size: 51MiB
+      max-file-size: 50MB
+      max-request-size: 51MB
   jpa:
     hibernate:
       ddl-auto: validate
