@@ -27,6 +27,32 @@
 ## Scope and concerns
 
 - The 35 skipped full-suite tests are pre-existing Docker-dependent integration tests; Docker was unavailable in this environment.
-- Direct non-relay uploads are intentionally implemented for the approved deployment's S3-compatible Cloudflare R2 policy (plus KS3), as well as Cloudreve local/relay and remote policies. Non-relay OneDrive, OSS, COS, OBS, Qiniu, and Upyun sessions fail closed as unsupported rather than guessing provider-specific completion semantics.
+- Review fix round 1 below narrows deployment acceptance to the configured S3 policy ID. Local/remote transport helpers remain protocol-correct, but Local, Remote, KS3, and other returned policy types now fail closed before transfer.
 - External presigned upload and download origins must be listed in `blog.media.cloudreve.provider-origins`; HTTPS is required unless trusted internal HTTP is explicitly enabled.
 - Pre-existing untracked `.gitignore` and `blog-backend/media/` were preserved and excluded from the Task 6 commit.
+
+## Review fix round 1
+
+### Protocol and policy hardening
+
+- `chunk_size=0` now follows Cloudreve's official unpartitioned-upload meaning: one exact-length request is streamed without allocating the whole declared object. This covers local-style relay transport (including the approved S3 policy when `relay=true`), empty objects, and the protocol helpers for local/remote sessions.
+- Every missing ancestor, including a fresh configured root, is created in order with `err_on_conflict=false`; HTTP 409 and Cloudreve logical 40004 are accepted so retries remain idempotent.
+- Upload-session parsing preserves a recoverable session ID and aborts malformed sessions. Five-digit Cloudreve server codes in the 50000 range map to `TRANSIENT`, authenticated API calls retry once after either HTTP or logical 401, and representative S3 multipart tests use the provider-valid 5 MiB non-final part contract.
+- S3 `CompleteMultipartUpload` 2xx bodies are parsed as hardened XML. Embedded/root `Error` responses and malformed/incomplete success documents are rejected and the session is aborted before the Cloudreve callback.
+- Download bodies are back-pressured instead of whole-buffered, capped at the largest configured media limit, and governed by an absolute deadline that starts after response headers. Limit/deadline/close failures cancel the live HTTP subscription.
+- The upload maximum is independent of provider chunk sizing. It is carried from the purpose/content-type application policy in `ObjectUploadRequest.maxBytes()`; declared oversize uploads fail before network I/O, while a small final part remains valid when Cloudreve advertises a larger provider chunk.
+
+### Deployment acceptance ruling and cost
+
+- Active Cloudreve configuration now requires `blog.media.cloudreve.policy-id` (`BLOG_MEDIA_CLOUDREVE_POLICY_ID`). Session creation sends `policy_id`, and the returned policy must have the exact configured ID and type `s3` before any asset bytes are transferred.
+- A matching S3 policy with `relay=true` is accepted even though its transport uses Cloudreve's local-style chunk endpoint; a matching non-relay S3 policy uses multipart. Returned Local, Remote, KS3, any other type, or a mismatched ID is rejected before data transfer. Local/remote zero-chunk helpers remain protocol-correct but are deliberately not accepted end-to-end for this deployment.
+- This fail-closed pin is the Cloudflare/R2 trust boundary: recreating or changing the approved Cloudreve policy changes its ID and stops uploads until operators update the configured ID. The client cannot independently infer the external vendor from Cloudreve's session shape; the configured policy ID supplies that administrative assertion while returned type `s3` prevents policy-type drift.
+
+### Source and TDD evidence
+
+- Cloudreve's upload guide documents unpartitioned `chunk_size=0`, local/relay and remote transports, and S3-compatible multipart completion: <https://github.com/cloudreve/docs/blob/v4/en/api/upload.md>. The backend upload service treats `chunk_size == 0` as the final whole-object chunk and accepts `policy_id`: <https://github.com/cloudreve/Cloudreve/blob/master/service/explorer/upload.go>. Official serializer documentation identifies five-digit codes beginning with 5 as server-side failures: <https://pkg.go.dev/github.com/cloudreve/Cloudreve/v4/pkg/serializer>.
+- RED: a 1 MiB+17 zero-chunk relay fixture proved the resumed implementation requested the whole object in one caller-stream read (`1048593 > 65536`). RED: a one-byte upload with an independent 10-byte application maximum and a 32 MiB provider chunk was incorrectly rejected as a malformed session.
+- GREEN: the zero-chunk path now streams through an exact-length publisher whose largest caller-stream read is at most 64 KiB, and session validation no longer treats provider chunk size as the application maximum. Additional focused cases cover policy request/response pinning, pre-transfer drift rejection, recursive directory creation, S3 2xx error XML, recoverable malformed-session abort, five-digit errors, HTTP 401, bounded/deadline downloads, and application-layer maximum propagation.
+- Focused command: `mvn -Dtest=CloudreveFileClientTest,CloudrevePropertiesTest,AdminCloudreveEnabledValuesControllerTest,MediaApplicationServiceTest test` — 78 tests, 0 failures, 0 errors, 0 skipped.
+- Full command: `mvn test` — 465 tests, 0 failures, 0 errors, 35 skipped. The skipped tests remain Docker-dependent integration gates; Docker is unavailable in this environment.
+- `git diff --check` passed. No concrete Cloudreve instance value or credential was used; tests use synthetic identifiers and ephemeral loopback servers only.

@@ -165,6 +165,7 @@ class CloudrevePropertiesTest {
                         "blog.media.cloudreve.redirect-uri=https://blog.example/api/admin/media/cloudreve/callback",
                         "blog.media.cloudreve.client-id=client-id",
                         "blog.media.cloudreve.client-secret=client-secret",
+                        "blog.media.cloudreve.policy-id=policy-example",
                         "blog.media.cloudreve.token-encryption-key=AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
@@ -180,12 +181,23 @@ class CloudrevePropertiesTest {
                 .run(context -> assertThat(context).hasFailed());
     }
 
+    @Test
+    void requiresAnExplicitApprovedStoragePolicyWhenCloudreveIsActive() {
+        CloudreveProperties properties = configuredProperties();
+        properties.setPolicyId("  ");
+
+        assertThatThrownBy(properties::validate)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("policy ID");
+    }
+
     private static CloudreveProperties configuredProperties() {
         CloudreveProperties properties = new CloudreveProperties();
         properties.setBaseUrl(URI.create("https://cloud.example"));
         properties.setRedirectUri(URI.create("https://blog.example/api/admin/media/cloudreve/callback"));
         properties.setClientId("client-id");
         properties.setClientSecret("client-secret");
+        properties.setPolicyId("policy-example");
         properties.setTokenEncryptionKey("AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=");
         return properties;
     }

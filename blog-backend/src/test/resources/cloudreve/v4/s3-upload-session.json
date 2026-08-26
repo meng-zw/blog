@@ -3,7 +3,7 @@
   "data": {
     "session_id": "session-example",
     "upload_id": "upload-example",
-    "chunk_size": 3,
+    "chunk_size": 5242880,
     "expires": 2000000000,
     "upload_urls": [
       "{{PROVIDER_ORIGIN}}/multipart/part-0",

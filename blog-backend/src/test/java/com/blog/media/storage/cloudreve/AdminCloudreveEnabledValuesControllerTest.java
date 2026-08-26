@@ -29,6 +29,7 @@ class AdminCloudreveEnabledValuesControllerTest {
                     "blog.media.cloudreve.redirect-uri=https://blog.example/api/admin/media/cloudreve/callback",
                     "blog.media.cloudreve.client-id=client-id",
                     "blog.media.cloudreve.client-secret=client-secret",
+                    "blog.media.cloudreve.policy-id=policy-example",
                     "blog.media.cloudreve.token-encryption-key=AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=");
 
     @ParameterizedTest

@@ -100,7 +100,8 @@ public class MediaApplicationService {
         asset.setUpdatedAt(now);
         asset = mediaRepository.save(asset);
 
-        ObjectUploadRequest objectRequest = new ObjectUploadRequest(asset.getStorageKey(), asset.getContentType(), asset.getByteSize());
+        ObjectUploadRequest objectRequest = new ObjectUploadRequest(asset.getStorageKey(), asset.getContentType(),
+                asset.getByteSize(), contentValidator.maximumBytes(asset.getPurpose(), asset.getContentType()));
         UploadTicket ticket = storage.capabilities().directUpload()
                 ? directTicket(storage, location(asset), objectRequest)
                 : new UploadTicket(UploadMode.PROXY, "PUT", URI.create("/api/admin/media/uploads/" + asset.getId() + "/content"),
@@ -119,7 +120,8 @@ public class MediaApplicationService {
             InputStream limitedContent = contentValidator.limitProxyUpload(
                     claim.purpose(), claim.contentType(), content);
             storage.upload(claim.location(), new ObjectUploadRequest(claim.location().objectKey(),
-                    claim.contentType(), claim.byteSize()), limitedContent);
+                    claim.contentType(), claim.byteSize(),
+                    contentValidator.maximumBytes(claim.purpose(), claim.contentType())), limitedContent);
             operationTransactions.finishProxyUpload(claim);
         } catch (IllegalArgumentException | ConflictException exception) {
             safelyReleaseProxyClaim(claim, exception);

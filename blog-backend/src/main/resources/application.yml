@@ -57,6 +57,7 @@ blog:
       redirect-uri: ${BLOG_MEDIA_CLOUDREVE_REDIRECT_URI:}
       client-id: ${BLOG_MEDIA_CLOUDREVE_CLIENT_ID:}
       client-secret: ${BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET:}
+      policy-id: ${BLOG_MEDIA_CLOUDREVE_POLICY_ID:}
       root-path: ${BLOG_MEDIA_CLOUDREVE_ROOT_PATH:/blog}
       token-encryption-key: ${BLOG_MEDIA_TOKEN_ENCRYPTION_KEY:}
       allow-trusted-internal-http: ${BLOG_MEDIA_CLOUDREVE_ALLOW_TRUSTED_INTERNAL_HTTP:false}

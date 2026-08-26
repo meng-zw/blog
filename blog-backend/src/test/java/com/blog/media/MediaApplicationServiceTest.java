@@ -7,12 +7,14 @@ import com.blog.media.dto.MediaUploadPlanResponse;
 import com.blog.media.dto.MediaUploadRequest;
 import com.blog.media.storage.ObjectStorage;
 import com.blog.media.storage.ObjectStorageRegistry;
+import com.blog.media.storage.ObjectUploadRequest;
 import com.blog.media.storage.StoredObject;
 import com.blog.media.storage.UploadMode;
 import com.blog.media.storage.UploadTicket;
 import com.blog.media.storage.ObjectStorageException;
 import com.blog.shared.error.ServiceUnavailableException;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -101,6 +103,21 @@ class MediaApplicationServiceTest {
         order.verify(fixture.operationTransactions).claimProxyUpload(42L, "owner");
         order.verify(fixture.storage).upload(eq(claim.location()), any(), any());
         order.verify(fixture.operationTransactions).finishProxyUpload(claim);
+    }
+
+    @Test
+    void proxyUploadPassesTheIndependentApplicationMaximumToStorage() throws Exception {
+        Fixture fixture = fixture(StorageProvider.LOCAL, false);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        var claim = proxyClaim(asset);
+        when(fixture.operationTransactions.claimProxyUpload(42L, "owner")).thenReturn(claim);
+
+        fixture.service.uploadProxyContent(42L, "owner", new ByteArrayInputStream(png()));
+
+        ArgumentCaptor<ObjectUploadRequest> request = ArgumentCaptor.forClass(ObjectUploadRequest.class);
+        verify(fixture.storage).upload(eq(claim.location()), request.capture(), any());
+        assertThat(request.getValue().byteSize()).isEqualTo(png().length);
+        assertThat(request.getValue().maxBytes()).isEqualTo(5L * 1024 * 1024);
     }
 
     @Test

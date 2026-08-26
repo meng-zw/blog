@@ -20,6 +20,7 @@ public class CloudreveProperties {
     private URI redirectUri;
     private String clientId;
     private String clientSecret;
+    private String policyId;
     private String rootPath = "/blog";
     private String tokenEncryptionKey;
     private boolean allowTrustedInternalHttp;
@@ -45,6 +46,8 @@ public class CloudreveProperties {
     public void setClientId(String clientId) { this.clientId = trimmed(clientId); }
     public String getClientSecret() { return clientSecret; }
     public void setClientSecret(String clientSecret) { this.clientSecret = trimmed(clientSecret); }
+    public String getPolicyId() { return policyId; }
+    public void setPolicyId(String policyId) { this.policyId = trimmed(policyId); }
     public String getRootPath() { return rootPath; }
     public void setRootPath(String rootPath) { this.rootPath = normalizeRootPath(rootPath); }
     public String getTokenEncryptionKey() { return tokenEncryptionKey; }
@@ -77,6 +80,7 @@ public class CloudreveProperties {
         }
         validateEncryptionKey(tokenEncryptionKey);
         validateBaseUrl(baseUrl);
+        requireText(policyId, "Cloudreve storage policy ID is required");
         validateUri(authorizationUri(), "Cloudreve authorization URI");
         validateUri(tokenUri(), "Cloudreve token URI");
         validateUri(refreshUri(), "Cloudreve refresh URI");

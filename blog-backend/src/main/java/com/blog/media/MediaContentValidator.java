@@ -143,7 +143,7 @@ public class MediaContentValidator {
         }
     }
 
-    private long maximumBytes(MediaPurpose purpose, String contentType) {
+    long maximumBytes(MediaPurpose purpose, String contentType) {
         if (purpose != MediaPurpose.ATTACHMENT) {
             return properties.getMaxBytes();
         }

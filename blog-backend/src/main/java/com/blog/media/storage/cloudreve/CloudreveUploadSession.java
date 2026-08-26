@@ -9,6 +9,7 @@ public record CloudreveUploadSession(
         String id,
         long chunkSize,
         Instant expiresAt,
+        String policyId,
         String policyType,
         boolean relay,
         List<URI> uploadUrls,
