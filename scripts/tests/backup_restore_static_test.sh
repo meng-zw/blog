@@ -23,6 +23,36 @@ assert_rejected() {
   }
 }
 
+# Returns success and prints a finding when a tracked Cloudreve deployment or
+# configuration source contains a concrete credential or private-IP endpoint.
+# `${...}` values are Compose/Spring indirection, not credential material.
+scan_cloudreve_configuration() {
+  local credential_pattern endpoint_pattern findings
+  credential_pattern='(?i)(BLOG_MEDIA_CLOUDREVE_(CLIENT_ID|CLIENT_SECRET|POLICY_ID)|BLOG_MEDIA_TOKEN_ENCRYPTION_KEY|client-id|client-secret|policy-id|token-encryption-key)[[:space:]]*[:=]'
+  endpoint_pattern='(?i)(BLOG_MEDIA_CLOUDREVE_(BASE_URL|AUTHORIZATION_URI|TOKEN_URI|REFRESH_URI|USERINFO_URI|REDIRECT_URI)|base-url|authorization-uri|token-uri|refresh-uri|userinfo-uri|redirect-uri)[[:space:]]*[:=][[:space:]]*https?://(10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}|192\.168\.(?:[0-9]{1,3}\.)[0-9]{1,3}|172\.(?:1[6-9]|2[0-9]|3[0-1])\.(?:[0-9]{1,3}\.)[0-9]{1,3})(?::[0-9]{1,5})?'
+  findings=$(rg --pcre2 -n -- "$credential_pattern" "$@" 2>/dev/null || true)
+  findings=$(printf '%s\n' "$findings" | rg -v '[:=][[:space:]]*(\$\{|$|<[^>]+>)' || true)
+  if [[ -n "$findings" ]]; then
+    printf '%s\n' "$findings"
+    return 0
+  fi
+  if rg --pcre2 -n -- "$endpoint_pattern" "$@"; then return 0; fi
+  return 1
+}
+
+assert_cloudreve_scan_rejects() {
+  local fixture=$1 expected=$2 output
+  if output=$(scan_cloudreve_configuration "$fixture"); then
+    [[ "$output" == *"$expected"* ]] || {
+      printf 'expected Cloudreve scan finding %q, got: %s\n' "$expected" "$output" >&2
+      exit 1
+    }
+  else
+    printf 'expected Cloudreve scan to reject fixture: %s\n' "$fixture" >&2
+    exit 1
+  fi
+}
+
 assert_rejected "$scripts_dir/backup.sh" '--destination is required'
 assert_rejected "$scripts_dir/backup.sh" '--project is required' --destination /tmp/backups
 assert_rejected "$scripts_dir/restore.sh" '--backup-dir is required'
@@ -128,15 +158,31 @@ grep -Fq 'Files.Read' "$repo_dir/docs/cloudreve-media.md"
 # concrete Cloudreve endpoint (including a private instance address).
 ! rg -n '^BLOG_MEDIA_CLOUDREVE_(BASE_URL|AUTHORIZATION_URI|TOKEN_URI|REFRESH_URI|USERINFO_URI|REDIRECT_URI|CLIENT_ID|CLIENT_SECRET|POLICY_ID)=.+$' "$production_env"
 ! rg -n '^BLOG_MEDIA_TOKEN_ENCRYPTION_KEY=.+$' "$production_env"
-# Scan all tracked Cloudreve deployment/configuration sources, not just the
-# example file. Existing unrelated loopback health checks and synthetic DTO
-# fixtures are intentionally outside this scoped scan; Cloudreve locations
-# must remain variables/placeholders, never concrete IP endpoints or secrets.
-! git -C "$repo_dir" grep -nE 'BLOG_MEDIA_CLOUDREVE_(BASE_URL|AUTHORIZATION_URI|TOKEN_URI|REFRESH_URI|USERINFO_URI|REDIRECT_URI|CLIENT_ID|CLIENT_SECRET|POLICY_ID)=[^[:space:]]+' -- .env.example
-! git -C "$repo_dir" grep -nE 'https?://([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]{1,5})?' -- \
-  docs/cloudreve-media.md blog-backend/src/main/java/com/blog/media/storage/cloudreve
-! git -C "$repo_dir" grep -nE '(ACCESS_TOKEN|REFRESH_TOKEN|CLIENT_SECRET|BLOG_MEDIA_TOKEN_ENCRYPTION_KEY)=[^[:space:]]+' -- \
-  .env.example docker-compose.yml docs/cloudreve-media.md README.md docs
+# Scan all tracked deployment/configuration sources: Compose, both environment
+# examples, Spring YAML, README/docs, and Cloudreve source. Scope the IP check
+# to Cloudreve configuration keys so unrelated Compose loopback health checks
+# remain allowed. This intentionally detects both `.env` (`=`) and YAML (`:`)
+# supplied Client IDs/secrets and encryption keys.
+cloudreve_sources=()
+while IFS= read -r source_file; do
+  cloudreve_sources+=("$repo_dir/$source_file")
+done < <(git -C "$repo_dir" ls-files -- .env.example .env.test.example docker-compose.yml README.md docs \
+  blog-backend/src/main/resources blog-backend/src/main/java/com/blog/media/storage/cloudreve)
+if findings=$(scan_cloudreve_configuration "${cloudreve_sources[@]}"); then
+  printf 'concrete Cloudreve deployment value found:\n%s\n' "$findings" >&2
+  exit 1
+fi
+
+# Mutation fixtures prove Compose-style YAML secrets and private Cloudreve
+# endpoints are caught, rather than only checking `.env` assignment syntax.
+fixture_dir=$(mktemp -d "${TMPDIR:-/tmp}/cloudreve-static-contract.XXXXXX")
+trap 'rm -rf "$fixture_dir"' EXIT
+secret_fixture="$fixture_dir/compose-secret.yml"
+ip_fixture="$fixture_dir/compose-private-ip.yml"
+printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: supplied-client-secret' > "$secret_fixture"
+printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_BASE_URL: http://192.168.10.20:5212' > "$ip_fixture"
+assert_cloudreve_scan_rejects "$secret_fixture" 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET'
+assert_cloudreve_scan_rejects "$ip_fixture" 'BLOG_MEDIA_CLOUDREVE_BASE_URL'
 grep -Fq 'Cloudreve/storage-policy backup' "$repo_dir/docs/cloudreve-media.md"
 grep -Fq 'retention/PITR' "$repo_dir/docs/cloudreve-media.md"
 grep -Fq 'post-restore reconciliation' "$repo_dir/docs/cloudreve-media.md"
