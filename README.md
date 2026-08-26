@@ -16,7 +16,7 @@
 - 公开页面：首页、文章与随笔、专题、工具、搜索、关于、站点地图
 - 管理后台：文章、专题、分类与标签、工具、媒体、站点资料和管理员密码
 - 不提供访客账号、公开写作入口及社区互动能力
-- 媒体只通过后台上传；默认使用持久化 Local 目录，也可切换 Cloudflare R2
+- 媒体只通过后台上传；默认使用持久化 Local 目录，也可切换 Cloudflare R2 或 Cloudreve
 
 ## 本地开发
 
@@ -77,9 +77,10 @@ npm run lint:legacy-routes
 主要环境变量：
 
 - `BLOG_PUBLIC_BASE_URL`：公开站点根地址
-- `BLOG_MEDIA_PROVIDER`：`local`（默认）或 `r2`
+- `BLOG_MEDIA_PROVIDER`：`local`（默认）、`r2` 或 `cloudreve`；只决定新上传位置，历史对象仍按记录的 provider 读取
 - `BLOG_MEDIA_LOCAL_DIRECTORY`：Local 媒体存储目录
 - `BLOG_MEDIA_R2_*`：R2 仅由 API 读取的账户、桶、S3 endpoint 与公开域名变量
+- `BLOG_MEDIA_CLOUDREVE_*` / `BLOG_MEDIA_TOKEN_ENCRYPTION_KEY`：Cloudreve OAuth、文件空间和 Token 加密配置，仅注入 API 容器
 - `MEDIA_UPLOAD_ORIGIN` / `MEDIA_PUBLIC_ORIGINS`：Web 容器 CSP 使用的精确 HTTPS R2 上传与图片 origin
 - `BLOG_MEDIA_UPLOAD_PLAN_RATE_LIMIT_*`：单实例上传计划限流参数（多 API 节点需替换为共享限流器）
 - `BLOG_ADMIN_USERNAME`：首次启动时创建的管理员用户名
@@ -87,5 +88,6 @@ npm run lint:legacy-routes
 - `BLOG_ADMIN_DISPLAY_NAME`：管理员显示名，默认“小M”
 
 生产部署必须使用独立密钥管理和最小权限数据库账号，并由反向代理终止 HTTPS。R2 桶、最小权限
-API Token、CORS、密钥轮换、对象迁移和回退见 [媒体存储运行手册](docs/media-storage.md)。容器、代理及
-CI 配置在发布验收任务中统一固化。
+API Token、CORS、密钥轮换、对象迁移和回退见 [媒体存储运行手册](docs/media-storage.md)；Cloudreve
+OAuth 应用、回调、最小 scope、Token 加密密钥与联调门禁见 [Cloudreve 媒体运行手册](docs/cloudreve-media.md)。
+容器、代理及 CI 配置在发布验收任务中统一固化。

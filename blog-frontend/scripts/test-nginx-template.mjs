@@ -11,6 +11,11 @@ const validator = resolve(root, 'nginx/validate-media-csp.sh')
 if (!/NGINX_ENVSUBST_FILTER=.*BACKEND_HOST.*BACKEND_PORT.*MEDIA_UPLOAD_ORIGIN.*MEDIA_PUBLIC_ORIGINS/.test(dockerfile)) {
   throw new Error('Docker image must restrict envsubst to backend and non-secret media origins')
 }
+for (const secretName of ['BLOG_MEDIA_CLOUDREVE_', 'BLOG_MEDIA_TOKEN_ENCRYPTION_KEY']) {
+  if (dockerfile.includes(secretName) || template.includes(secretName)) {
+    throw new Error(`Cloudreve server-only value leaked into the public web image: ${secretName}`)
+  }
+}
 const rendered = template.replaceAll('${BACKEND_HOST}', 'api').replaceAll('${BACKEND_PORT}', '8081')
   .replaceAll('${MEDIA_UPLOAD_ORIGIN}', 'https://account.r2.cloudflarestorage.com')
   .replaceAll('${MEDIA_PUBLIC_ORIGINS}', 'https://images.example.com https://legacy-images.example.com')

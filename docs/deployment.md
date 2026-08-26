@@ -8,7 +8,7 @@
 
 ## 首次部署
 
-1. `cp .env.example .env`，替换每个 `CHANGE_ME`，管理员密码使用独立强密码，`PUBLIC_BASE_URL` 使用最终 HTTPS 地址。Local 为默认媒体存储；如选择 R2，先按 [媒体存储运行手册](media-storage.md) 配好 API 专用凭据、桶、公开域名、精确的 `MEDIA_UPLOAD_ORIGIN` / `MEDIA_PUBLIC_ORIGINS` CSP 来源和 CORS。
+1. `cp .env.example .env`，替换每个 `CHANGE_ME`，管理员密码使用独立强密码，`PUBLIC_BASE_URL` 使用最终 HTTPS 地址。Local 为默认媒体存储；如选择 R2，先按 [媒体存储运行手册](media-storage.md) 配好 API 专用凭据、桶、公开域名、精确的 `MEDIA_UPLOAD_ORIGIN` / `MEDIA_PUBLIC_ORIGINS` CSP 来源和 CORS。如选择 Cloudreve，先按 [Cloudreve 媒体运行手册](cloudreve-media.md) 创建 OAuth 应用、在受限的主机密钥系统填写 API 专用变量并完成非生产门禁；不要把 Cloudreve 变量、Client Secret 或 Token 加密密钥加入 Web/Nginx 配置。
 2. `docker compose --env-file .env config --quiet` 检查变量与配置。
 3. `docker compose --env-file .env build --pull` 构建镜像；构建阶段会先运行后端和前端测试。
 4. `docker compose --env-file .env up -d --wait --wait-timeout 240`。
@@ -42,4 +42,4 @@ docker compose --env-file .env up -d --wait --wait-timeout 240
 docker compose --env-file .env ps
 ```
 
-失败时保留远程数据库和媒体卷，查看 `docker compose --env-file .env logs api web`，修复后重建；不要用空卷覆盖已有数据。Local↔R2 的对象迁移、回退和密钥轮换流程见 [媒体存储运行手册](media-storage.md)。仅测试环境需要容器数据库时，使用 `--profile local-db`。
+失败时保留远程数据库和媒体卷，查看 `docker compose --env-file .env logs api web`，修复后重建；不要用空卷覆盖已有数据。Local/R2/Cloudreve 的对象迁移、回退和密钥轮换流程见 [媒体存储运行手册](media-storage.md) 与 [Cloudreve 媒体运行手册](cloudreve-media.md)。仅测试环境需要容器数据库时，使用 `--profile local-db`。

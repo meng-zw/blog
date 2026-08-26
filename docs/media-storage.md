@@ -1,9 +1,9 @@
-# 媒体存储：Local 与 Cloudflare R2
+# 媒体存储：Local、Cloudflare R2 与 Cloudreve
 
 媒体模块为文章内图片、头像、封面和公开附件分配稳定地址：
 `/api/media/assets/{mediaId}`。Markdown 与业务数据只保存该地址或媒体 ID，**绝不保存** R2、`r2.dev`、GitHub/Gitee 等供应商 URL。因此对象域名、桶名或供应商变化时，已发布文章无需重写。
 
-第一版支持 `local` 与 `r2`。上传是正式对象上传：`READY` 但未被内容引用的对象会在后台媒体库显示为“未使用”，不会自动清理；等待上传超过 24 小时或校验失败的对象会进入清理流程。附件默认公开下载，不能上传敏感资料。
+支持 `local`、`r2` 与 `cloudreve`。上传是正式对象上传：`READY` 但未被内容引用的对象会在后台媒体库显示为“未使用”，不会自动清理；等待上传超过 24 小时或校验失败的对象会进入清理流程。附件默认公开下载，不能上传敏感资料。
 
 ## 运行方式与变量
 
@@ -35,6 +35,8 @@ MEDIA_PUBLIC_ORIGINS=https://img.example.com
 ```
 
 R2 provider 启动时会校验账户、Access Key、Secret、bucket 与 HTTPS 公共地址；故意不会让 Compose 在 Local 模式下要求这些变量。R2 固定使用 S3 区域 `auto` 和 path-style endpoint，因而没有 `BLOG_MEDIA_R2_REGION` 变量。凭据不会传给 Nginx/Web 容器、浏览器或前端构建；浏览器只会取得服务端签发、默认 10 分钟过期的单对象 PUT URL。
+
+Cloudreve 使用后端代理上传和读取，不会向浏览器签发 Cloudreve Token、临时下载地址或上传凭据，也不需要修改 Nginx CSP。设为 `BLOG_MEDIA_PROVIDER=cloudreve` 前，必须完成 [Cloudreve 媒体运行手册](cloudreve-media.md) 的 OAuth 应用、API 容器专用 Secret、根目录及非生产联调门禁。若 Local 仍是默认上传位置但存在历史 Cloudreve 对象，保留 `BLOG_MEDIA_PROVIDER=local` 并设置 `BLOG_MEDIA_CLOUDREVE_ENABLED=true` 与完整 Cloudreve API 配置；历史记录会依自身 provider 继续通过博客稳定地址读取。Cloudreve 的 Client Secret、Token 加密密钥、Access Token、Refresh Token 和实例地址绝不能传给 `web` 容器、前端构建或公开配置。
 
 `MEDIA_UPLOAD_ORIGIN` 与 `MEDIA_PUBLIC_ORIGINS` 只是注入 Nginx CSP 的非敏感 origin：前者填写 R2 S3 endpoint 的 origin，后者填写公共图片域 origin；多个公共域以空格分隔。不要填写 `*`。API 也会从 R2 配置生成同样的窄 CSP。启用 R2 后若遗漏这些 Web 变量，浏览器会阻止跨域 PUT 或重定向后的图片加载。
 
@@ -142,6 +144,8 @@ V13 使用存储生成的 SHA-256 `location_hash` 唯一标识 `(provider,bucket
 5. 保留旧对象与旧凭据直到备份窗口、回归和日志观察都完成。回退时恢复上一份数据库备份或将已迁移记录的存储定位指回仍保留的源对象，再将默认 provider 改回 Local。
 
 未来增加 OSS 等 provider 只需实现 `ObjectStorage` 适配器并复用该流程。GitHub/Gitee 可以实现代理上传适配器，但受仓库体积、提交冲突、限流与访问稳定性影响，不适合作为生产图床。
+
+Cloudreve 迁移遵循相同的稳定媒体 ID 边界，但读取和下载始终由博客 API 流式代理。先在目标 Cloudreve 文件空间创建受限根目录并授权 OAuth 用户，按小批次复制、检查对象大小/类型，再只更新验证成功记录的 `(provider,bucket,storage_key)`；保留源对象、源配置和备份窗口。回退时将这些记录指回仍保留的源对象，并把默认 provider 改回 `local`。详细的 OAuth、Token 密钥轮换、断开连接、卸载和故障处理见 [Cloudreve 媒体运行手册](cloudreve-media.md)。
 
 ## 上线检查
 

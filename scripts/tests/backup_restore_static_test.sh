@@ -70,6 +70,56 @@ web_block=$(sed -n '/^  web:/,/^volumes:/p' "$compose_file")
 ! grep -Fq 'BLOG_MEDIA_R2_' <<<"$web_block"
 ! grep -Fq 'BLOG_MEDIA_R2_' "$repo_dir/blog-frontend/Dockerfile"
 
+# Cloudreve uses the same API-only secret boundary as R2. Its default remains
+# opt-in so an existing Local deployment does not need an OAuth app or secrets.
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_ENABLED: ${BLOG_MEDIA_CLOUDREVE_ENABLED:-false}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_PROVIDER=local' "$production_env"
+grep -Eq '^BLOG_MEDIA_CLOUDREVE_ENABLED=false$' "$production_env"
+for variable in \
+  BLOG_MEDIA_CLOUDREVE_BASE_URL \
+  BLOG_MEDIA_CLOUDREVE_AUTHORIZATION_URI \
+  BLOG_MEDIA_CLOUDREVE_TOKEN_URI \
+  BLOG_MEDIA_CLOUDREVE_REFRESH_URI \
+  BLOG_MEDIA_CLOUDREVE_USERINFO_URI \
+  BLOG_MEDIA_CLOUDREVE_REDIRECT_URI \
+  BLOG_MEDIA_CLOUDREVE_CLIENT_ID \
+  BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET \
+  BLOG_MEDIA_CLOUDREVE_POLICY_ID \
+  BLOG_MEDIA_CLOUDREVE_ROOT_PATH \
+  BLOG_MEDIA_TOKEN_ENCRYPTION_KEY \
+  BLOG_MEDIA_CLOUDREVE_ALLOW_TRUSTED_INTERNAL_HTTP \
+  BLOG_MEDIA_CLOUDREVE_CONNECT_TIMEOUT \
+  BLOG_MEDIA_CLOUDREVE_REQUEST_TIMEOUT; do
+  grep -Fq "$variable: \${$variable:-}" "$compose_file"
+  grep -q "^$variable=" "$production_env"
+done
+grep -Eq '^BLOG_MEDIA_CLOUDREVE_CLIENT_ID=$' "$production_env"
+grep -Eq '^BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET=$' "$production_env"
+grep -Eq '^BLOG_MEDIA_TOKEN_ENCRYPTION_KEY=$' "$production_env"
+grep -Eq '^BLOG_MEDIA_CLOUDREVE_ALLOW_TRUSTED_INTERNAL_HTTP=false$' "$production_env"
+
+# Compose must retain API-side callback and endpoint overrides exactly as
+# environment interpolation, rather than baking a Cloudreve host or callback
+# into a container image. The public web service must never see Cloudreve data.
+! grep -Fq 'BLOG_MEDIA_CLOUDREVE_' <<<"$web_block"
+! grep -Fq 'BLOG_MEDIA_TOKEN_ENCRYPTION_KEY' <<<"$web_block"
+! grep -Fq 'BLOG_MEDIA_CLOUDREVE_' "$repo_dir/blog-frontend/Dockerfile"
+! grep -Fq 'BLOG_MEDIA_TOKEN_ENCRYPTION_KEY' "$repo_dir/blog-frontend/Dockerfile"
+! grep -Fq 'BLOG_MEDIA_CLOUDREVE_' "$repo_dir/blog-frontend/nginx/default.conf.template"
+! grep -Fq 'BLOG_MEDIA_TOKEN_ENCRYPTION_KEY' "$repo_dir/blog-frontend/nginx/default.conf.template"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_REDIRECT_URI: ${BLOG_MEDIA_CLOUDREVE_REDIRECT_URI:-}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_AUTHORIZATION_URI: ${BLOG_MEDIA_CLOUDREVE_AUTHORIZATION_URI:-}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_TOKEN_URI: ${BLOG_MEDIA_CLOUDREVE_TOKEN_URI:-}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_REFRESH_URI: ${BLOG_MEDIA_CLOUDREVE_REFRESH_URI:-}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_USERINFO_URI: ${BLOG_MEDIA_CLOUDREVE_USERINFO_URI:-}' "$compose_file"
+
+# Example configuration is intentionally credential-free and must not grow a
+# concrete Cloudreve endpoint (including a private instance address).
+! rg -n '^BLOG_MEDIA_CLOUDREVE_(BASE_URL|AUTHORIZATION_URI|TOKEN_URI|REFRESH_URI|USERINFO_URI|REDIRECT_URI|CLIENT_ID|CLIENT_SECRET|POLICY_ID)=.+$' "$production_env"
+! rg -n '^BLOG_MEDIA_TOKEN_ENCRYPTION_KEY=.+$' "$production_env"
+! rg -n 'https?://([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]{1,5})?' \
+  "$compose_file" "$production_env" "$repo_dir/docs/cloudreve-media.md"
+
 # R2 always uses S3's required `auto` region internally. Neither base nor
 # production configuration may reintroduce a user-configurable region value.
 if rg -n 'BLOG_MEDIA_R2_REGION|^\s+region:' "$repo_dir/blog-backend/src/main/resources/application.yml" \
