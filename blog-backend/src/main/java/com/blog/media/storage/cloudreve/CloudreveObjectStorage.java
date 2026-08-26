@@ -133,10 +133,15 @@ public final class CloudreveObjectStorage implements ObjectStorage {
     }
 
     private StoredObject storedObject(String expectedKey, CloudreveFileMetadata metadata) {
-        if (metadata == null || !logicalUri(rootPath + "/" + expectedKey).equals(metadata.path())) {
+        if (metadata == null || !objectUri(expectedKey).equals(metadata.path())) {
             throw ObjectStorageException.transientFailure("Cloudreve returned invalid media metadata", null);
         }
         return new StoredObject(expectedKey, metadata.contentType(), metadata.byteSize(), metadata.primaryEntity());
+    }
+
+    /** Matches CloudreveFileClient.fileUri: root is a prefix only when it is not the logical root itself. */
+    private String objectUri(String relativeKey) {
+        return logicalUri(("/".equals(rootPath) ? "" : rootPath) + "/" + relativeKey);
     }
 
     private StoredObject recoverExistingUpload(String key, ObjectUploadRequest request,

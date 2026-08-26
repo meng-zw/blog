@@ -79,6 +79,32 @@ class CloudreveObjectStorageTest {
     }
 
     @Test
+    void rootPathUsesTheSameSingleSlashLogicalUriAsTheClientForEveryObjectOperation() throws Exception {
+        Fixture fixture = fixture("/");
+        ObjectLocation location = fixture.storage.locationForNewObject(SOURCE_KEY);
+        ObjectUploadRequest request = new ObjectUploadRequest(STORED_KEY, "image/png", 3, 10);
+        ByteArrayInputStream upload = new ByteArrayInputStream(new byte[]{1, 2, 3});
+        CloudreveFileMetadata metadata = new CloudreveFileMetadata(
+                "cloudreve://my/" + STORED_KEY, "file-id", "image/png", 3, "entity-etag");
+        when(fixture.client.upload(STORED_KEY, request, upload)).thenReturn(metadata);
+        when(fixture.client.inspect(STORED_KEY)).thenReturn(metadata);
+        InputStream content = new ByteArrayInputStream(new byte[]{1, 2, 3});
+        when(fixture.client.open(STORED_KEY)).thenReturn(content);
+
+        assertThat(location).isEqualTo(new ObjectLocation(StorageProvider.CLOUDREVE,
+                "cloudreve://my/", STORED_KEY));
+        assertThat(fixture.storage.upload(location, request, upload).etag()).isEqualTo("entity-etag");
+        assertThat(fixture.storage.inspect(location).etag()).isEqualTo("entity-etag");
+        assertThat(fixture.storage.openStream(location)).isSameAs(content);
+        fixture.storage.delete(location);
+
+        verify(fixture.client).upload(STORED_KEY, request, upload);
+        verify(fixture.client).inspect(STORED_KEY);
+        verify(fixture.client).open(STORED_KEY);
+        verify(fixture.client).delete(STORED_KEY);
+    }
+
+    @Test
     void mapsMissingAndProviderFailuresWithoutExposingCloudreveDetails() {
         Fixture fixture = fixture("/blog/media");
         ObjectLocation location = new ObjectLocation(StorageProvider.CLOUDREVE, ROOT_IDENTITY, STORED_KEY);
