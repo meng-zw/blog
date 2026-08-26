@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { attachmentFileHint, completeMediaUpload, requestMediaUpload } from './api'
+import { attachmentFileHint, authorizeCloudreve, completeMediaUpload, disconnectCloudreve, getCloudreveConnection, requestMediaUpload } from './api'
 
 const fetchMock = vi.fn<typeof fetch>()
 
@@ -71,5 +71,43 @@ describe('media API', () => {
     })
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/admin/media/8/complete')
     expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('X-XSRF-TOKEN')).toBe('media-csrf')
+  })
+
+  it('decodes safe Cloudreve connection metadata and accepts only allowed authorization redirects', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      configured: true, status: 'CONNECTED', authorized_subject: 'user-42', authorized_display_name: 'Cloudreve 管理员',
+      granted_scopes: ['Files.Read', 'Files.Write'], access_token_expires_at: '2026-08-24T10:15:00Z',
+      refresh_token_expires_at: '2026-09-24T10:15:00Z', root_path: '/blog'
+    }), { headers: { 'Content-Type': 'application/json' } }))
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ redirect_url: 'https://cloud.example/session/authorize' }), {
+      headers: { 'Content-Type': 'application/json' }
+    }))
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+    await expect(getCloudreveConnection()).resolves.toMatchObject({
+      authorizedSubject: 'user-42', accessTokenExpiresAt: '2026-08-24T10:15:00Z', rootPath: '/blog'
+    })
+    await expect(authorizeCloudreve()).resolves.toBe('https://cloud.example/session/authorize')
+    await expect(disconnectCloudreve()).resolves.toBeUndefined()
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/admin/media/cloudreve', '/api/admin/media/cloudreve/authorize', '/api/admin/media/cloudreve/disconnect'
+    ])
+  })
+
+  it('allows a same-origin HTTP authorization redirect for a local HTTP deployment', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ redirect_url: `${window.location.origin}/session/authorize` }), {
+      headers: { 'Content-Type': 'application/json' }
+    }))
+
+    await expect(authorizeCloudreve()).resolves.toBe(`${window.location.origin}/session/authorize`)
+  })
+
+  it.each(['javascript:alert(1)', 'data:text/html,test', '/session/authorize', 'http://cloud.example/session/authorize', 'https://user:password@cloud.example/session/authorize'])
+  ('rejects an unsafe Cloudreve authorization redirect: %s', async (redirectUrl) => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ redirect_url: redirectUrl }), {
+      headers: { 'Content-Type': 'application/json' }
+    }))
+
+    await expect(authorizeCloudreve()).rejects.toThrow('invalid Cloudreve authorization redirect')
   })
 })

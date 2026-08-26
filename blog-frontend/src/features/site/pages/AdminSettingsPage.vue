@@ -48,6 +48,7 @@
         <button class="admin-button" type="submit" :disabled="saving || uploading">{{ saving ? '正在保存…' : '保存设置' }}</button>
       </div>
     </form>
+    <CloudreveConnectionCard v-if="!loading && !loadError" :callback-outcome="cloudreveCallbackOutcome" />
   </section>
 </template>
 
@@ -56,6 +57,7 @@ import { onMounted, reactive, ref } from 'vue'
 import type { UpdateSiteProfileRequest } from '../../../shared/api/contracts'
 import { ApiProblem } from '../../../shared/api/problem'
 import { ACCEPTED_IMAGE_TYPES, imageFileHint } from '../../media/api'
+import CloudreveConnectionCard from '../../media/components/CloudreveConnectionCard.vue'
 import { uploadMedia } from '../../media/uploader'
 import { loadAdminSettings, updateAdminSettings } from '../admin-api'
 import { updateSharedPublicProfile } from '../public-profile'
@@ -68,6 +70,7 @@ const errorMessage = ref('')
 const traceId = ref('')
 const successMessage = ref('')
 const avatarUrl = ref('/images/xiao-m-mark.png')
+const cloudreveCallbackOutcome = new URLSearchParams(window.location.search).get('cloudreve')
 const form = reactive<UpdateSiteProfileRequest>({
   siteTitle: '', subtitle: '', nickname: '', bio: '', githubUrl: '', avatarMediaId: null
 })

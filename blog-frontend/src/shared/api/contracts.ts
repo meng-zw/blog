@@ -56,6 +56,18 @@ export interface UpdateSiteProfileRequest {
 export type MediaPurpose = 'AVATAR' | 'ARTICLE_COVER' | 'TOPIC_COVER' | 'TOOL_COVER' | 'INLINE_IMAGE' | 'ATTACHMENT'
 export type MediaUploadMode = 'DIRECT' | 'PROXY'
 export type MediaStatus = 'PENDING_UPLOAD' | 'READY' | 'DELETING' | 'FAILED' | 'ABANDONED' | 'DELETED'
+export type CloudreveConnectionStatus = 'DISCONNECTED' | 'CONNECTED' | 'REFRESHING' | 'REAUTH_REQUIRED'
+
+export interface CloudreveConnectionResponse {
+  configured: boolean
+  status: CloudreveConnectionStatus
+  authorizedSubject: string | null
+  authorizedDisplayName: string | null
+  grantedScopes: string[]
+  accessTokenExpiresAt: IsoDateTime | null
+  refreshTokenExpiresAt: IsoDateTime | null
+  rootPath: string
+}
 
 export interface MediaUploadPlanResponse {
   mediaId: number
@@ -79,7 +91,7 @@ export interface MediaAssetResponse {
 }
 
 export interface AdminMediaAssetResponse extends MediaAssetResponse {
-  provider: 'LOCAL' | 'R2'
+  provider: 'LOCAL' | 'R2' | 'CLOUDREVE'
   referenced: boolean
   canDelete: boolean
   createdAt: IsoDateTime

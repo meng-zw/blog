@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SiteProfileResponse } from '../../../shared/api/contracts'
 import { loadAdminSettings, updateAdminSettings } from '../admin-api'
+import { getCloudreveConnection } from '../../media/api'
 import { uploadMedia } from '../../media/uploader'
 import { readSharedPublicProfile, resetSharedPublicProfile } from '../public-profile'
 import AdminSettingsPage from './AdminSettingsPage.vue'
@@ -10,7 +11,7 @@ import AdminSettingsPage from './AdminSettingsPage.vue'
 vi.mock('../admin-api', () => ({ loadAdminSettings: vi.fn(), updateAdminSettings: vi.fn() }))
 vi.mock('../../media/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../media/api')>()
-  return actual
+  return { ...actual, getCloudreveConnection: vi.fn(), authorizeCloudreve: vi.fn(), disconnectCloudreve: vi.fn(), navigateToCloudreveAuthorization: vi.fn() }
 })
 vi.mock('../../media/uploader', () => ({ uploadMedia: vi.fn() }))
 
@@ -24,7 +25,12 @@ describe('admin settings page', () => {
     vi.mocked(loadAdminSettings).mockReset().mockResolvedValue(profile)
     vi.mocked(updateAdminSettings).mockReset()
     vi.mocked(uploadMedia).mockReset()
+    vi.mocked(getCloudreveConnection).mockReset().mockResolvedValue({
+      configured: true, status: 'DISCONNECTED', authorizedSubject: null, authorizedDisplayName: null,
+      grantedScopes: [], accessTokenExpiresAt: null, refreshTokenExpiresAt: null, rootPath: '/blog'
+    })
     resetSharedPublicProfile()
+    window.history.replaceState({}, '', '/admin/settings')
   })
 
   it('loads only approved profile fields and previews the full square badge', async () => {
@@ -71,5 +77,14 @@ describe('admin settings page', () => {
     expect(wrapper.get('.admin-avatar-preview img').attributes('src')).toBe('/api/media/new-badge.png')
     expect(readSharedPublicProfile().siteTitle).toBe('山中笔记')
     expect(readSharedPublicProfile()).not.toHaveProperty('avatarMediaId')
+  })
+
+  it('passes only the fixed Cloudreve callback outcome from the URL to the connection card', async () => {
+    window.history.replaceState({}, '', '/admin/settings?cloudreve=connected&state=secret')
+    const wrapper = mount(AdminSettingsPage)
+    await flushPromises()
+
+    expect(wrapper.get('[aria-live="polite"]').text()).toContain('Cloudreve 已连接。')
+    expect(wrapper.text()).not.toContain('state=secret')
   })
 })

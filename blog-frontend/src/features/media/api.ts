@@ -1,4 +1,4 @@
-import type { AdminMediaAssetResponse, MediaPurpose, MediaStatus, MediaUploadPlanResponse, MediaAssetResponse } from '../../shared/api/contracts'
+import type { AdminMediaAssetResponse, CloudreveConnectionResponse, MediaPurpose, MediaStatus, MediaUploadPlanResponse, MediaAssetResponse } from '../../shared/api/contracts'
 import { http } from '../../shared/api/http'
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -67,3 +67,43 @@ export function listMedia(page = 0, size = 24, status?: MediaStatus, purpose?: M
 }
 
 export function deleteMedia(mediaId: number): Promise<void> { return http.delete<void>(`/admin/media/${mediaId}`) }
+
+type CloudreveAuthorizationRedirectResponse = { redirectUrl?: unknown }
+export type CloudreveAuthorizationUrl = string
+
+function allowedCloudreveAuthorizationUrl(value: unknown): CloudreveAuthorizationUrl {
+  if (typeof value !== 'string' || !value || value !== value.trim()) throw new Error('invalid Cloudreve authorization redirect')
+
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new Error('invalid Cloudreve authorization redirect')
+  }
+
+  const sameHttpOrigin = typeof window !== 'undefined'
+    && window.location.protocol === 'http:'
+    && url.protocol === 'http:'
+    && url.origin === window.location.origin
+  if ((url.protocol !== 'https:' && !sameHttpOrigin) || url.username || url.password) {
+    throw new Error('invalid Cloudreve authorization redirect')
+  }
+  return url.toString()
+}
+
+export function getCloudreveConnection(): Promise<CloudreveConnectionResponse> {
+  return http.get<CloudreveConnectionResponse>('/admin/media/cloudreve')
+}
+
+export async function authorizeCloudreve(): Promise<CloudreveAuthorizationUrl> {
+  const response = await http.post<CloudreveAuthorizationRedirectResponse>('/admin/media/cloudreve/authorize')
+  return allowedCloudreveAuthorizationUrl(response.redirectUrl)
+}
+
+export function navigateToCloudreveAuthorization(authorizationUrl: CloudreveAuthorizationUrl): void {
+  window.location.assign(authorizationUrl)
+}
+
+export function disconnectCloudreve(): Promise<void> {
+  return http.post<void>('/admin/media/cloudreve/disconnect')
+}
