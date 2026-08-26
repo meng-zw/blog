@@ -14,6 +14,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
+/** 内容专题实体；normalizedName 和 slug 分别用于去重和稳定路由。 */
 @Entity
 @Table(name = "topic")
 public class Topic extends AuditedEntity {

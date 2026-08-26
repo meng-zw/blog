@@ -11,6 +11,7 @@ import java.util.Map;
  * Resolves the configured storage adapter for persisted media locations.
  */
 @Component
+/** 存储提供方注册表；业务只依赖此入口，从而将切换 Local/R2/Cloudreve 的影响限制在配置层。 */
 public class ObjectStorageRegistry {
     private final Map<StorageProvider, ObjectStorage> storages;
 

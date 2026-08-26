@@ -23,11 +23,13 @@ import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
+/** 文章聚合根：保存编辑态 Markdown，并在发布时维护可展示的 HTML 与媒体引用。 */
 @Entity(name = "PublishingArticle")
 @Table(name = "article")
 public class Article extends AuditedEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    /** 数据库主键；对外链接使用 slug，不直接暴露该值。 */
     private Long id;
 
     @Column(nullable = false, unique = true, length = 255)
@@ -51,6 +53,7 @@ public class Article extends AuditedEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
+    /** 发布状态由 ArticleService 统一驱动，避免控制器直接修改状态机。 */
     private ArticleStatus status;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -115,6 +118,7 @@ public class Article extends AuditedEntity {
     public String getSeoDescription() { return seoDescription; }
     public void setSeoDescription(String seoDescription) { this.seoDescription = seoDescription; }
 
+    /** 只有已发布且到达发布时间的文章才对访客可见。 */
     public boolean isVisibleAt(Instant now) {
         return status == ArticleStatus.PUBLISHED && publishedAt != null && !publishedAt.isAfter(now);
     }

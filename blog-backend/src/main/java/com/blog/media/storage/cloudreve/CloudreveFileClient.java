@@ -45,6 +45,7 @@ import javax.xml.stream.XMLStreamReader;
 /** Secret-safe, bounded Cloudreve v4 file and upload client. */
 @Component
 @Conditional(CloudreveConfiguration.CloudreveRequiredConfigurationCondition.class)
+/** Cloudreve v4 文件 API 适配层：屏蔽 OAuth、分片协议及错误映射，业务层只处理统一存储契约。 */
 public class CloudreveFileClient {
     private static final int MAX_JSON_BYTES = 64 * 1024;
     private static final int MAX_PROVIDER_RESPONSE_BYTES = 64 * 1024;

@@ -68,6 +68,7 @@ public class MediaDeletionService {
 
     /** One idempotent cleanup attempt, also used immediately after authoritative validation failure. */
     public boolean cleanupOne(long mediaId) {
+        // 删除分为数据库状态迁移和提供方删除两步；提供方失败时保留可重试状态，避免丢失清理任务。
         return cleanupOne(mediaId, clock.instant().minus(PENDING_EXPIRY));
     }
 

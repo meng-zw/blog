@@ -12,6 +12,7 @@ import jakarta.persistence.Table;
 
 import java.time.Instant;
 
+/** 工具与正文媒体的关联实体，sortOrder 保持图片展示顺序。 */
 @Entity
 @Table(name = "tool_media")
 public class ToolMedia {

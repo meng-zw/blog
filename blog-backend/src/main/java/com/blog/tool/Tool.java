@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
+/** 提效工具聚合根，支持精选排序、分类标签和 Markdown 说明。 */
 @Entity(name = "PublishingTool")
 @Table(name = "tool")
 public class Tool extends AuditedEntity {
@@ -62,6 +63,7 @@ public class Tool extends AuditedEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
+    /** 工具的发布状态；公开查询必须通过 isVisibleAt 判断。 */
     private ToolStatus status;
 
     @Column(nullable = false)
@@ -102,6 +104,7 @@ public class Tool extends AuditedEntity {
     public Instant getPublishedAt() { return publishedAt; }
     public void setPublishedAt(Instant publishedAt) { this.publishedAt = publishedAt; }
 
+    /** 防止未来定时发布的工具提前出现在公开页面。 */
     public boolean isVisibleAt(Instant now) {
         return status == ToolStatus.PUBLISHED && publishedAt != null && !publishedAt.isAfter(now);
     }

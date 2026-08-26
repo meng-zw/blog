@@ -12,10 +12,12 @@ import jakarta.persistence.Table;
 
 import java.time.Instant;
 
+/** 文章与媒体的关联实体，role 区分正文图片和可下载附件。 */
 @Entity
 @Table(name = "article_media")
 public class ArticleMedia {
     @EmbeddedId
+    /** 复合主键保证同一媒体不会以同一角色重复挂载到文章。 */
     private ArticleMediaId id;
 
     @MapsId("articleId")

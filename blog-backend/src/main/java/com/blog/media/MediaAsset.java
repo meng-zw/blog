@@ -11,6 +11,7 @@ import jakarta.persistence.Table;
 
 import java.time.Instant;
 
+/** 媒体资产元数据。文件本体由 ObjectStorage 保存，本表只保存可迁移的位置和生命周期状态。 */
 @Entity
 @Table(name = "media_asset")
 public class MediaAsset {
@@ -20,16 +21,19 @@ public class MediaAsset {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
+    /** 实际存储提供方；与 storageKey 一起组成稳定定位，允许未来切换图床。 */
     private StorageProvider provider;
 
     @Column(nullable = false, length = 255)
     private String bucket;
 
     @Column(name = "storage_key", nullable = false, length = 500)
+    /** 提供方内部相对路径，禁止保存临时 URL 或带凭据的地址。 */
     private String storageKey;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
+    /** 上传状态机：PENDING_UPLOAD/VERIFYING/READY/FAILED 等由媒体服务推进。 */
     private MediaStatus status;
 
     @Enumerated(EnumType.STRING)
@@ -55,6 +59,7 @@ public class MediaAsset {
     private Long uploadedById;
 
     @Column(name = "operation_token", length = 36)
+    /** 并发操作租约令牌，用于防止重复完成、删除或清理同一文件。 */
     private String operationToken;
 
     @Column(name = "created_at", nullable = false, updatable = false)

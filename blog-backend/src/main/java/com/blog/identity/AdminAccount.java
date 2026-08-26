@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+/** 唯一后台管理员账户；访客不创建账户，也不参与此实体的认证流程。 */
 @Entity
 @Table(name = "admin_account")
 public class AdminAccount extends AuditedEntity {
@@ -22,6 +23,7 @@ public class AdminAccount extends AuditedEntity {
 
     @JsonIgnore
     @Column(name = "password_hash", nullable = false, length = 255)
+    /** 只保存密码哈希，明文密码仅在启动初始化或修改密码时短暂存在。 */
     private String passwordHash;
 
     @Column(name = "display_name", nullable = false, length = 120)

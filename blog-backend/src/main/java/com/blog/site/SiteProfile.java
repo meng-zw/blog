@@ -12,6 +12,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
+/** 全站唯一的个人资料配置，头像通过媒体资产关联而非直接保存文件 URL。 */
 @Entity
 @Table(name = "site_profile")
 public class SiteProfile extends AuditedEntity {

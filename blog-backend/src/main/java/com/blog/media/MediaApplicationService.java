@@ -84,6 +84,7 @@ public class MediaApplicationService {
 
     @Transactional
     public MediaUploadPlanResponse requestUpload(MediaUploadRequest request, String username) {
+        // 先写入 PENDING_UPLOAD 元数据，再向存储提供方申请上传；网络 I/O 不放在事务中。
         contentValidator.validateDeclaration(request.purpose(), request.filename(), request.contentType(), request.byteSize());
         AdminAccount owner = currentAdministrator(username);
         ObjectStorage storage = storageRegistry.get(properties.getProvider());
@@ -139,6 +140,7 @@ public class MediaApplicationService {
     }
 
     public MediaResponse complete(long mediaId, String username) {
+        // complete 是幂等入口：通过操作租约串行化校验，避免重复读取或重复确认同一对象。
         var claim = operationTransactions.claimVerification(mediaId, username);
         if (claim.status() == MediaStatus.READY) return response(claim);
         ObjectStorage storage;

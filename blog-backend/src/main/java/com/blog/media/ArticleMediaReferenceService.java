@@ -40,6 +40,7 @@ public class ArticleMediaReferenceService {
     }
 
     public void synchronize(Article article, String markdown, List<Long> attachmentMediaIds) {
+        // 保存文章前先锁定并校验全部媒体，确保正文引用和附件引用不会指向未完成上传的文件。
         if (article == null || article.getId() == null) {
             throw new IllegalArgumentException("Article must be saved before media references are synchronized");
         }
