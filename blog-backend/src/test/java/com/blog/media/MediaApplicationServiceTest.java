@@ -9,12 +9,20 @@ import com.blog.media.storage.ObjectStorage;
 import com.blog.media.storage.ObjectStorageRegistry;
 import com.blog.media.storage.ObjectUploadRequest;
 import com.blog.media.storage.StoredObject;
+import com.blog.media.storage.StorageCapabilities;
 import com.blog.media.storage.UploadMode;
 import com.blog.media.storage.UploadTicket;
 import com.blog.media.storage.ObjectStorageException;
 import com.blog.shared.error.ServiceUnavailableException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.aop.framework.ProxyFactory;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
+import org.springframework.transaction.interceptor.TransactionInterceptor;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
@@ -96,8 +104,12 @@ class MediaApplicationServiceTest {
         MediaAsset asset = pendingAsset(42L, 7L);
         var claim = proxyClaim(asset);
         when(fixture.operationTransactions.claimProxyUpload(42L, "owner")).thenReturn(claim);
+        when(fixture.storage.upload(eq(claim.location()), any(), any())).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return new StoredObject(claim.location().objectKey(), claim.contentType(), claim.byteSize(), "etag");
+        });
 
-        fixture.service.uploadProxyContent(42L, "owner", new ByteArrayInputStream(png()));
+        transactionalProxy(fixture.service).uploadProxyContent(42L, "owner", new ByteArrayInputStream(png()));
 
         var order = inOrder(fixture.operationTransactions, fixture.storage);
         order.verify(fixture.operationTransactions).claimProxyUpload(42L, "owner");
@@ -133,7 +145,31 @@ class MediaApplicationServiceTest {
                 42L, "owner", new ByteArrayInputStream(png())))
                 .isInstanceOf(ServiceUnavailableException.class);
 
-        verify(fixture.operationTransactions).releaseProxyUpload(claim);
+        verify(fixture.operationTransactions).releaseProxyUploadClaim(claim.mediaId(), claim.operationToken());
+    }
+
+    @Test
+    void successfulProxyUploadRemainsRecoverableWhenItsFinalDatabaseTransitionFails() throws Exception {
+        Fixture fixture = fixture(StorageProvider.CLOUDREVE, false);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        asset.setProvider(StorageProvider.CLOUDREVE);
+        asset.setBucket("cloudreve://my/blog/media");
+        asset.setStorageKey("inline-images/2026/08/123e4567-e89b-12d3-a456-426614174000.png");
+        var claim = proxyClaim(asset);
+        when(fixture.operationTransactions.claimProxyUpload(42L, "owner")).thenReturn(claim);
+        org.mockito.Mockito.doThrow(new org.springframework.dao.TransientDataAccessResourceException("commit uncertain"))
+                .when(fixture.operationTransactions).finishProxyUpload(claim);
+
+        assertThatThrownBy(() -> fixture.service.uploadProxyContent(
+                42L, "owner", new ByteArrayInputStream(png())))
+                .isInstanceOf(ServiceUnavailableException.class);
+
+        var order = inOrder(fixture.storage, fixture.operationTransactions);
+        order.verify(fixture.storage).upload(eq(claim.location()), any(), any());
+        order.verify(fixture.operationTransactions).finishProxyUpload(claim);
+        order.verify(fixture.operationTransactions)
+                .releaseProxyUploadClaim(claim.mediaId(), claim.operationToken());
+        verify(fixture.storage, never()).delete(any());
     }
 
     @Test
@@ -320,9 +356,11 @@ class MediaApplicationServiceTest {
     }
 
     @Test
-    void redirectsOnlyAfterAuthoritativelyInspectingTheReadySnapshot() {
-        Fixture fixture = fixture(StorageProvider.LOCAL, false);
+    void redirectsR2OnlyAfterAuthoritativelyInspectingTheReadySnapshot() {
+        Fixture fixture = fixture(StorageProvider.R2, true);
         MediaAsset asset = pendingAsset(42L, 7L);
+        asset.setProvider(StorageProvider.R2);
+        asset.setBucket("blog-media");
         asset.setStatus(MediaStatus.READY);
         when(fixture.readTransactions.readySnapshot(42L)).thenReturn(
                 new MediaReadTransactionService.ReadyMediaSnapshot(42L, location(asset), asset.getContentType(),
@@ -331,8 +369,70 @@ class MediaApplicationServiceTest {
                 new StoredObject(asset.getStorageKey(), asset.getContentType(), asset.getByteSize(), "etag-1"));
         when(fixture.storage.resolvePublicUrl(location(asset))).thenReturn(URI.create("https://cdn.example/asset.png"));
 
-        assertThat(fixture.service.resolvePublic(42L).location()).isEqualTo(URI.create("https://cdn.example/asset.png"));
+        assertThat(fixture.service.resolvePublic(42L))
+                .isEqualTo(new MediaApplicationService.PublicMediaRedirect(
+                        URI.create("https://cdn.example/asset.png"), asset.getContentType(),
+                        asset.getOriginalFilename(), asset.getPurpose()));
         verify(fixture.storage).inspect(location(asset));
+    }
+
+    @Test
+    void streamsHistoricalCloudreveImageAfterSnapshotWhenLocalIsTheDefault() throws Exception {
+        MediaAssetRepository mediaRepository = mock(MediaAssetRepository.class);
+        ObjectStorageRegistry registry = mock(ObjectStorageRegistry.class);
+        ObjectStorage cloudreve = mock(ObjectStorage.class);
+        MediaProperties properties = new MediaProperties();
+        properties.setProvider(StorageProvider.LOCAL);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        asset.setProvider(StorageProvider.CLOUDREVE);
+        asset.setBucket("cloudreve://my/blog/media");
+        asset.setStorageKey("inline-images/2026/08/123e4567-e89b-12d3-a456-426614174000.png");
+        asset.setStatus(MediaStatus.READY);
+        com.blog.media.storage.ObjectLocation persisted = location(asset);
+        when(registry.get(StorageProvider.CLOUDREVE)).thenReturn(cloudreve);
+        when(cloudreve.capabilities()).thenReturn(new StorageCapabilities(false, true));
+        MediaReadTransactionService reads = mock(MediaReadTransactionService.class);
+        when(reads.readySnapshot(42L)).thenReturn(new MediaReadTransactionService.ReadyMediaSnapshot(
+                42L, persisted, asset.getContentType(), asset.getOriginalFilename(), asset.getByteSize(), asset.getPurpose()));
+        ByteArrayInputStream stream = new ByteArrayInputStream(png());
+        when(cloudreve.openStream(persisted)).thenReturn(stream);
+        MediaApplicationService service = new MediaApplicationService(mediaRepository,
+                mock(AdminAccountRepository.class), registry, new MediaContentValidator(properties),
+                mock(MediaReferenceChecker.class), properties, mock(MediaDeletionService.class),
+                mock(MediaDeletionTransactionService.class), mock(MediaOperationTransactionService.class), reads,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+
+        MediaApplicationService.PublicMediaContent result =
+                (MediaApplicationService.PublicMediaContent) service.resolvePublic(42L);
+
+        assertThat(result.content()).isSameAs(stream);
+        assertThat(result.byteSize()).isEqualTo(asset.getByteSize());
+        var order = inOrder(reads, cloudreve);
+        order.verify(reads).readySnapshot(42L);
+        order.verify(cloudreve).openStream(persisted);
+        verify(cloudreve, never()).inspect(persisted);
+        verify(cloudreve, never()).resolvePublicUrl(persisted);
+    }
+
+    @Test
+    void publicProxyStorageIoRunsOutsideApplicationTransactions() throws Exception {
+        Fixture fixture = fixture(StorageProvider.CLOUDREVE, false);
+        MediaAsset asset = pendingAsset(42L, 7L);
+        asset.setProvider(StorageProvider.CLOUDREVE);
+        asset.setBucket("cloudreve://my/blog/media");
+        asset.setStorageKey("inline-images/2026/08/123e4567-e89b-12d3-a456-426614174000.png");
+        asset.setStatus(MediaStatus.READY);
+        when(fixture.readTransactions.readySnapshot(42L)).thenReturn(
+                new MediaReadTransactionService.ReadyMediaSnapshot(42L, location(asset), asset.getContentType(),
+                        asset.getOriginalFilename(), asset.getByteSize(), asset.getPurpose()));
+        when(fixture.storage.openStream(location(asset))).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return new ByteArrayInputStream(png());
+        });
+        MediaApplicationService.PublicMediaContent result =
+                (MediaApplicationService.PublicMediaContent) transactionalProxy(fixture.service).resolvePublic(42L);
+
+        assertThat(result.content()).isNotNull();
     }
 
     @Test
@@ -348,6 +448,8 @@ class MediaApplicationServiceTest {
         asset.setStatus(MediaStatus.READY);
         com.blog.media.storage.ObjectLocation persisted = location(asset);
         when(registry.get(StorageProvider.R2)).thenReturn(r2);
+        when(r2.capabilities()).thenReturn(new StorageCapabilities(
+                true, true, StorageCapabilities.PublicAccessMode.REDIRECT));
         MediaReadTransactionService reads = mock(MediaReadTransactionService.class);
         when(reads.readySnapshot(42L)).thenReturn(new MediaReadTransactionService.ReadyMediaSnapshot(
                 42L, persisted, asset.getContentType(), asset.getOriginalFilename(), asset.getByteSize(), asset.getPurpose()));
@@ -361,7 +463,10 @@ class MediaApplicationServiceTest {
                 reads,
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
-        assertThat(service.resolvePublic(42L).location()).hasToString("https://archive.example/asset.png");
+        assertThat(service.resolvePublic(42L))
+                .isEqualTo(new MediaApplicationService.PublicMediaRedirect(
+                        URI.create("https://archive.example/asset.png"), asset.getContentType(),
+                        asset.getOriginalFilename(), asset.getPurpose()));
         verify(r2).inspect(persisted);
         verify(r2).resolvePublicUrl(persisted);
     }
@@ -498,7 +603,9 @@ class MediaApplicationServiceTest {
         MediaProperties properties = new MediaProperties();
         properties.setProvider(provider);
         when(registry.get(provider)).thenReturn(storage);
-        when(storage.capabilities()).thenReturn(new com.blog.media.storage.StorageCapabilities(directUpload, true));
+        when(storage.capabilities()).thenReturn(provider == StorageProvider.R2
+                ? new StorageCapabilities(directUpload, true, StorageCapabilities.PublicAccessMode.REDIRECT)
+                : new StorageCapabilities(directUpload, true));
         when(storage.provider()).thenReturn(provider);
         when(storage.locationForNewObject(any())).thenAnswer(invocation -> new com.blog.media.storage.ObjectLocation(
                 provider, provider == StorageProvider.LOCAL ? "" : "blog-media", invocation.getArgument(0)));
@@ -604,5 +711,34 @@ class MediaApplicationServiceTest {
                            MediaDeletionTransactionService deletionTransactions, MediaDeletionService deletionService,
                            MediaOperationTransactionService operationTransactions,
                            MediaReadTransactionService readTransactions) {
+    }
+
+    private static MediaApplicationService transactionalProxy(MediaApplicationService target) {
+        ProxyFactory proxyFactory = new ProxyFactory(target);
+        proxyFactory.setProxyTargetClass(true);
+        TransactionInterceptor interceptor = new TransactionInterceptor();
+        interceptor.setTransactionManager(new TestTransactionManager());
+        interceptor.setTransactionAttributeSource(new AnnotationTransactionAttributeSource());
+        proxyFactory.addAdvice(interceptor);
+        return (MediaApplicationService) proxyFactory.getProxy();
+    }
+
+    private static final class TestTransactionManager extends AbstractPlatformTransactionManager {
+        @Override
+        protected Object doGetTransaction() {
+            return new Object();
+        }
+
+        @Override
+        protected void doBegin(Object transaction, TransactionDefinition definition) {
+        }
+
+        @Override
+        protected void doCommit(DefaultTransactionStatus status) {
+        }
+
+        @Override
+        protected void doRollback(DefaultTransactionStatus status) {
+        }
     }
 }

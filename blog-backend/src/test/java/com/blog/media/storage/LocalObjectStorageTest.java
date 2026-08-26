@@ -21,7 +21,7 @@ class LocalObjectStorageTest {
     Path mediaDirectory;
 
     @Test
-    void storesPurposePrefixedUuidKeyAtomicallyAndExposesProxyMetadata() throws Exception {
+    void storesPurposePrefixedUuidKeyAtomicallyAndExposesRedirectMetadata() throws Exception {
         LocalObjectStorage storage = storage();
         String key = "inline-images/" + UUID.randomUUID() + ".png";
         byte[] content = "image-content".getBytes(StandardCharsets.UTF_8);
@@ -30,7 +30,8 @@ class LocalObjectStorageTest {
                 new ByteArrayInputStream(content));
 
         assertThat(storage.provider()).isEqualTo(StorageProvider.LOCAL);
-        assertThat(storage.capabilities()).isEqualTo(new StorageCapabilities(false, true));
+        assertThat(storage.capabilities()).isEqualTo(new StorageCapabilities(
+                false, true, StorageCapabilities.PublicAccessMode.REDIRECT));
         assertThat(stored.key()).isEqualTo(key);
         assertThat(stored.contentType()).isEqualTo("image/png");
         assertThat(stored.byteSize()).isEqualTo(content.length);

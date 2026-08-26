@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeUnit;
 
 /** Stable public media endpoints preserve provider-neutral URLs and error responses. */
 @RestController
@@ -24,8 +25,15 @@ public class PublicMediaController {
     }
 
     @GetMapping("/{mediaId}")
-    public ResponseEntity<Void> open(@PathVariable long mediaId) {
-        return redirect(mediaApplicationService.resolvePublic(mediaId));
+    public ResponseEntity<StreamingResponseBody> open(@PathVariable long mediaId) {
+        MediaApplicationService.PublicMediaAsset asset = mediaApplicationService.resolvePublic(mediaId);
+        if (asset instanceof MediaApplicationService.PublicMediaRedirect redirect) {
+            return redirect(redirect);
+        }
+        if (asset instanceof MediaApplicationService.PublicMediaContent content) {
+            return inline(content);
+        }
+        throw new IllegalStateException("Unsupported public media response");
     }
 
     @GetMapping("/{mediaId}/download")
@@ -45,9 +53,22 @@ public class PublicMediaController {
                 .body(body);
     }
 
-    private static ResponseEntity<Void> redirect(MediaApplicationService.PublicMediaAsset asset) {
+    private static ResponseEntity<StreamingResponseBody> redirect(MediaApplicationService.PublicMediaRedirect asset) {
         ResponseEntity.BodyBuilder response = ResponseEntity.status(HttpStatus.FOUND).location(asset.location())
                 .cacheControl(CacheControl.noStore());
         return response.build();
+    }
+
+    private static ResponseEntity<StreamingResponseBody> inline(MediaApplicationService.PublicMediaContent asset) {
+        StreamingResponseBody body = outputStream -> {
+            try (var content = asset.content()) {
+                content.transferTo(outputStream);
+            }
+        };
+        return ResponseEntity.ok()
+                .contentType(org.springframework.http.MediaType.parseMediaType(asset.contentType()))
+                .contentLength(asset.byteSize())
+                .cacheControl(CacheControl.maxAge(365, TimeUnit.DAYS).cachePublic().immutable())
+                .body(body);
     }
 }

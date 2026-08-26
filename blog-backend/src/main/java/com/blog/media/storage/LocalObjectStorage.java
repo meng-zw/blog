@@ -46,7 +46,7 @@ public class LocalObjectStorage implements ObjectStorage {
 
     @Override
     public StorageCapabilities capabilities() {
-        return new StorageCapabilities(false, true);
+        return new StorageCapabilities(false, true, StorageCapabilities.PublicAccessMode.REDIRECT);
     }
 
     @Override

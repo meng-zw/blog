@@ -61,7 +61,7 @@ public class R2ObjectStorage implements ObjectStorage {
 
     @Override
     public StorageCapabilities capabilities() {
-        return new StorageCapabilities(true, true);
+        return new StorageCapabilities(true, true, StorageCapabilities.PublicAccessMode.REDIRECT);
     }
 
     @Override

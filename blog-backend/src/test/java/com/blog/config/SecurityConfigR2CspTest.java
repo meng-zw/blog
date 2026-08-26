@@ -41,7 +41,7 @@ class SecurityConfigR2CspTest {
 
     @Test
     void narrowlyAllowsConfiguredR2UploadAndPublicImageOrigins() throws Exception {
-        when(mediaApplicationService.resolvePublic(42L)).thenReturn(new MediaApplicationService.PublicMediaAsset(
+        when(mediaApplicationService.resolvePublic(42L)).thenReturn(new MediaApplicationService.PublicMediaRedirect(
                 URI.create("https://images.example.com/blog/inline-images/42.png"), "image/png", "note.png",
                 MediaPurpose.INLINE_IMAGE));
 

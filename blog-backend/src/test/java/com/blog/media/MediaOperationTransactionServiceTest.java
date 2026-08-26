@@ -115,6 +115,36 @@ class MediaOperationTransactionServiceTest {
         verify(fixture.repository, never()).saveAndFlush(asset);
     }
 
+    @Test
+    void releasesOnlyTheMatchingProxyUploadClaimAfterAnUncertainCommit() {
+        Fixture fixture = fixture();
+        MediaAsset asset = pending();
+        asset.setStatus(MediaStatus.UPLOADING);
+        asset.setOperationToken("token-1");
+        when(fixture.repository.lockById(42L)).thenReturn(Optional.of(asset));
+
+        assertThat(fixture.service.releaseProxyUploadClaim(42L, "token-1")).isTrue();
+
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.PENDING_UPLOAD);
+        assertThat(asset.getOperationToken()).isNull();
+        verify(fixture.repository).saveAndFlush(asset);
+    }
+
+    @Test
+    void uncertainProxyCommitCannotRegressANewerClaim() {
+        Fixture fixture = fixture();
+        MediaAsset asset = pending();
+        asset.setStatus(MediaStatus.UPLOADING);
+        asset.setOperationToken("newer-token");
+        when(fixture.repository.lockById(42L)).thenReturn(Optional.of(asset));
+
+        assertThat(fixture.service.releaseProxyUploadClaim(42L, "stale-token")).isFalse();
+
+        assertThat(asset.getStatus()).isEqualTo(MediaStatus.UPLOADING);
+        assertThat(asset.getOperationToken()).isEqualTo("newer-token");
+        verify(fixture.repository, never()).saveAndFlush(asset);
+    }
+
     private Fixture fixture() {
         MediaAssetRepository repository = mock(MediaAssetRepository.class);
         AdminAccountRepository administrators = mock(AdminAccountRepository.class);

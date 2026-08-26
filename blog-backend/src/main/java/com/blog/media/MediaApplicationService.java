@@ -14,6 +14,7 @@ import com.blog.media.storage.StoredObject;
 import com.blog.media.storage.UploadMode;
 import com.blog.media.storage.UploadTicket;
 import com.blog.media.storage.ObjectStorageException;
+import com.blog.media.storage.StorageCapabilities;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
 import com.blog.shared.error.ServiceUnavailableException;
@@ -203,11 +204,21 @@ public class MediaApplicationService {
         var snapshot = readTransactions.readySnapshot(mediaId);
         try {
             ObjectStorage storage = storageRegistry.get(snapshot.location().provider());
-            storage.inspect(snapshot.location());
-            return new PublicMediaAsset(storage.resolvePublicUrl(snapshot.location()), snapshot.contentType(),
-                    snapshot.filename(), snapshot.purpose());
+            StorageCapabilities capabilities = storage.capabilities();
+            if (!capabilities.publicRead()) {
+                throw new IllegalStateException("Storage provider does not support public reads");
+            }
+            if (capabilities.publicAccessMode() == StorageCapabilities.PublicAccessMode.REDIRECT) {
+                storage.inspect(snapshot.location());
+                return new PublicMediaRedirect(storage.resolvePublicUrl(snapshot.location()), snapshot.contentType(),
+                        snapshot.filename(), snapshot.purpose());
+            }
+            return new PublicMediaContent(storage.openStream(snapshot.location()), snapshot.contentType(),
+                    snapshot.filename(), snapshot.byteSize());
         } catch (ObjectStorageException exception) {
             throw exception;
+        } catch (IOException exception) {
+            throw new ServiceUnavailableException("Media storage is temporarily unavailable", exception);
         } catch (RuntimeException exception) {
             throw new ServiceUnavailableException("Media storage is temporarily unavailable", exception);
         }
@@ -266,7 +277,7 @@ public class MediaApplicationService {
 
     private void safelyReleaseProxyClaim(MediaOperationTransactionService.OperationClaim claim, Exception original) {
         try {
-            operationTransactions.releaseProxyUpload(claim);
+            operationTransactions.releaseProxyUploadClaim(claim.mediaId(), claim.operationToken());
         } catch (RuntimeException releaseFailure) {
             original.addSuppressed(releaseFailure);
         }
@@ -338,9 +349,11 @@ public class MediaApplicationService {
         return contentType.substring(0, parameters < 0 ? contentType.length() : parameters).trim().toLowerCase(Locale.ROOT);
     }
 
-    public record PublicMediaAsset(URI location, String contentType, String filename, MediaPurpose purpose) {
-    }
+    public sealed interface PublicMediaAsset permits PublicMediaRedirect, PublicMediaContent { }
 
-    public record PublicMediaContent(InputStream content, String contentType, String filename, long byteSize) {
-    }
+    public record PublicMediaRedirect(URI location, String contentType, String filename, MediaPurpose purpose)
+            implements PublicMediaAsset { }
+
+    public record PublicMediaContent(InputStream content, String contentType, String filename, long byteSize)
+            implements PublicMediaAsset { }
 }

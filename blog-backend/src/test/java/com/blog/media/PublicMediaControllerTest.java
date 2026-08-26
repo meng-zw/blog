@@ -37,7 +37,7 @@ class PublicMediaControllerTest {
 
     @Test
     void redirectsReadyMediaAtStableAddress() throws Exception {
-        when(mediaApplicationService.resolvePublic(42L)).thenReturn(new MediaApplicationService.PublicMediaAsset(
+        when(mediaApplicationService.resolvePublic(42L)).thenReturn(new MediaApplicationService.PublicMediaRedirect(
                 URI.create("https://cdn.example/inline-images/42.png"), "image/png", "note.png", MediaPurpose.INLINE_IMAGE));
 
         mockMvc.perform(get("/api/media/assets/42").contextPath("/api"))
@@ -46,6 +46,20 @@ class PublicMediaControllerTest {
                 .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")))
                 .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.not(
                         org.hamcrest.Matchers.containsString("immutable"))));
+    }
+
+    @Test
+    void streamsProxyBackedImageAtTheSameStableAddress() throws Exception {
+        when(mediaApplicationService.resolvePublic(42L)).thenReturn(new MediaApplicationService.PublicMediaContent(
+                new ByteArrayInputStream("image-bytes".getBytes()), "image/png", "note.png", 11L));
+
+        mockMvc.perform(get("/api/media/assets/42").contextPath("/api"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", "image/png"))
+                .andExpect(header().longValue("Content-Length", 11L))
+                .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("immutable")))
+                .andExpect(header().doesNotExist("Location"))
+                .andExpect(content().bytes("image-bytes".getBytes()));
     }
 
     @Test

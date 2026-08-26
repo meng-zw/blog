@@ -86,8 +86,20 @@ public class MediaOperationTransactionService {
      */
     @Transactional
     public boolean releaseVerificationClaim(long mediaId, String operationToken) {
+        return releaseClaim(mediaId, operationToken, MediaStatus.VERIFYING);
+    }
+
+    /**
+     * Recovers an upload claim after an uncertain post-upload commit without touching a newer operation.
+     */
+    @Transactional
+    public boolean releaseProxyUploadClaim(long mediaId, String operationToken) {
+        return releaseClaim(mediaId, operationToken, MediaStatus.UPLOADING);
+    }
+
+    private boolean releaseClaim(long mediaId, String operationToken, MediaStatus expectedStatus) {
         MediaAsset asset = repository.lockById(mediaId).orElse(null);
-        if (asset == null || asset.getStatus() != MediaStatus.VERIFYING || operationToken == null
+        if (asset == null || asset.getStatus() != expectedStatus || operationToken == null
                 || !operationToken.equals(asset.getOperationToken())) {
             return false;
         }

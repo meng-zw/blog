@@ -6,6 +6,8 @@ import com.blog.shared.error.ConflictException;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.autoconfigure.domain.EntityScan;
@@ -126,6 +128,75 @@ class MediaOperationConcurrencyMySqlIntegrationTest {
                 assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
             }
         }
+    }
+
+    @Test
+    void proxyUploadAndExpiredCleanupCannotBothClaimTheSameObject() throws Exception {
+        for (int iteration = 0; iteration < RACE_ITERATIONS; iteration++) {
+            MediaAsset asset = mediaRepository.saveAndFlush(expiredPendingAsset(100 + iteration));
+            CountDownLatch start = new CountDownLatch(1);
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            try {
+                Future<VerificationOutcome> upload = executor.submit(() -> {
+                    start.await();
+                    try {
+                        MediaOperationTransactionService.OperationClaim claim =
+                                operationTransactions.claimProxyUpload(asset.getId(), USERNAME);
+                        return VerificationOutcome.claimed(claim.operationToken());
+                    } catch (RuntimeException exception) {
+                        return VerificationOutcome.rejected(exception);
+                    }
+                });
+                Future<Optional<MediaDeletionTransactionService.DeletionTarget>> cleanup = executor.submit(() -> {
+                    start.await();
+                    return deletionTransactions.claimCleanup(asset.getId(), NOW);
+                });
+
+                start.countDown();
+                VerificationOutcome uploadOutcome = upload.get(10, TimeUnit.SECONDS);
+                Optional<MediaDeletionTransactionService.DeletionTarget> cleanupOutcome =
+                        cleanup.get(10, TimeUnit.SECONDS);
+
+                MediaAsset persisted = mediaRepository.findById(asset.getId()).orElseThrow();
+                if (uploadOutcome.claimed()) {
+                    assertThat(cleanupOutcome)
+                            .as("iteration %s must not expose an upload-owned object to cleanup", iteration)
+                            .isEmpty();
+                    assertThat(persisted.getStatus()).isEqualTo(MediaStatus.UPLOADING);
+                    assertThat(persisted.getOperationToken()).isEqualTo(uploadOutcome.operationToken());
+                } else {
+                    assertThat(uploadOutcome.rejection()).isInstanceOf(ConflictException.class);
+                    assertThat(cleanupOutcome).isPresent();
+                    assertThat(persisted.getStatus()).isEqualTo(MediaStatus.ABANDONED);
+                    assertThat(persisted.getOperationToken()).isNull();
+                }
+            } finally {
+                executor.shutdownNow();
+                assertThat(executor.awaitTermination(5, TimeUnit.SECONDS)).isTrue();
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = MediaStatus.class, names = {"UPLOADING", "VERIFYING"})
+    void expiredCrashClaimsBecomeRecoverableCleanupTargets(MediaStatus crashedStatus) {
+        MediaAsset asset = expiredPendingAsset(200 + crashedStatus.ordinal());
+        asset.setProvider(StorageProvider.CLOUDREVE);
+        asset.setBucket("cloudreve://my/blog/media");
+        asset.setStorageKey("inline-images/2026/08/123e4567-e89b-12d3-a456-42661417400"
+                + crashedStatus.ordinal() + ".png");
+        asset.setStatus(crashedStatus);
+        asset.setOperationToken("crashed-operation-token");
+        asset = mediaRepository.saveAndFlush(asset);
+
+        Optional<MediaDeletionTransactionService.DeletionTarget> cleanup =
+                deletionTransactions.claimCleanup(asset.getId(), NOW);
+
+        assertThat(cleanup).isPresent();
+        assertThat(cleanup.orElseThrow().location().provider()).isEqualTo(StorageProvider.CLOUDREVE);
+        MediaAsset persisted = mediaRepository.findById(asset.getId()).orElseThrow();
+        assertThat(persisted.getStatus()).isEqualTo(MediaStatus.ABANDONED);
+        assertThat(persisted.getOperationToken()).isNull();
     }
 
     private MediaAsset expiredPendingAsset(int iteration) {
