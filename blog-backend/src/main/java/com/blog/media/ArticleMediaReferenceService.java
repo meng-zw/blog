@@ -2,6 +2,7 @@ package com.blog.media;
 
 import com.blog.article.Article;
 import com.blog.shared.error.ResourceNotFoundException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -20,6 +21,7 @@ public class ArticleMediaReferenceService {
     private final Clock clock;
     private final StableMediaReferenceParser stableMediaReferenceParser;
 
+    @Autowired
     public ArticleMediaReferenceService(ArticleMediaRepository articleMediaRepository,
                                         MediaAssetRepository mediaAssetRepository) {
         this(articleMediaRepository, mediaAssetRepository, Clock.systemUTC());

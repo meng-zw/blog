@@ -7,6 +7,7 @@ import com.blog.media.storage.StoredObject;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
@@ -20,6 +21,7 @@ public class MediaOperationTransactionService {
     private final AdminAccountRepository administrators;
     private final Clock clock;
 
+    @Autowired
     public MediaOperationTransactionService(MediaAssetRepository repository, AdminAccountRepository administrators) {
         this(repository, administrators, Clock.systemUTC());
     }

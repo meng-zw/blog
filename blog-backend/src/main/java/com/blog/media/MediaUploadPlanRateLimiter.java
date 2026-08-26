@@ -1,5 +1,6 @@
 package com.blog.media;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -22,6 +23,7 @@ public class MediaUploadPlanRateLimiter {
     private final int maximumEntries;
     private final Map<RateLimitKey, RequestWindow> requests = new LinkedHashMap<>();
 
+    @Autowired
     public MediaUploadPlanRateLimiter(MediaProperties properties) {
         this(properties, Clock.systemUTC());
     }

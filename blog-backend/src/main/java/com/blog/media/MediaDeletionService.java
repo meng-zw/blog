@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -28,6 +29,7 @@ public class MediaDeletionService {
     private final ObjectStorageRegistry storageRegistry;
     private final Clock clock;
 
+    @Autowired
     public MediaDeletionService(MediaDeletionTransactionService transactions, MediaAssetRepository mediaRepository,
                                 ObjectStorageRegistry storageRegistry) {
         this(transactions, mediaRepository, storageRegistry, Clock.systemUTC());

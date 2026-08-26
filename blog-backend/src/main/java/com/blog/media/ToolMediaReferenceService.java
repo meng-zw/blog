@@ -3,6 +3,7 @@ package com.blog.media;
 import com.blog.shared.error.ResourceNotFoundException;
 import com.blog.tool.Tool;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
@@ -21,6 +22,7 @@ public class ToolMediaReferenceService {
     private final StableMediaReferenceParser stableMediaReferenceParser;
     private final Clock clock;
 
+    @Autowired
     public ToolMediaReferenceService(ToolMediaRepository toolMediaRepository,
                                      MediaAssetRepository mediaAssetRepository) {
         this(toolMediaRepository, mediaAssetRepository, new StableMediaReferenceParser(), Clock.systemUTC());

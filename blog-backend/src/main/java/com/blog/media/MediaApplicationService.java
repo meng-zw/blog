@@ -18,6 +18,7 @@ import com.blog.media.storage.StorageCapabilities;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
 import com.blog.shared.error.ServiceUnavailableException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -49,6 +50,7 @@ public class MediaApplicationService {
     private final MediaReadTransactionService readTransactions;
     private final Clock clock;
 
+    @Autowired
     public MediaApplicationService(MediaAssetRepository mediaRepository, AdminAccountRepository adminAccountRepository,
                                    ObjectStorageRegistry storageRegistry, MediaContentValidator contentValidator,
                                    MediaReferenceChecker referenceChecker, MediaProperties properties,

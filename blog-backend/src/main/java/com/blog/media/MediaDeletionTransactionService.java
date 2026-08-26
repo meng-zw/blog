@@ -6,6 +6,7 @@ import com.blog.media.storage.ObjectLocation;
 import com.blog.shared.error.ConflictException;
 import com.blog.shared.error.ResourceNotFoundException;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
@@ -21,6 +22,7 @@ public class MediaDeletionTransactionService {
     private final MediaReferenceChecker referenceChecker;
     private final Clock clock;
 
+    @Autowired
     public MediaDeletionTransactionService(MediaAssetRepository mediaRepository, AdminAccountRepository adminRepository,
                                            MediaReferenceChecker referenceChecker) {
         this(mediaRepository, adminRepository, referenceChecker, Clock.systemUTC());
