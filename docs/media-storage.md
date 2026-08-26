@@ -147,6 +147,8 @@ V13 使用存储生成的 SHA-256 `location_hash` 唯一标识 `(provider,bucket
 
 Cloudreve 迁移遵循相同的稳定媒体 ID 边界，但读取和下载始终由博客 API 流式代理。先在目标 Cloudreve 文件空间创建受限根目录并授权 OAuth 用户，按小批次复制、检查对象大小/类型，再只更新验证成功记录的 `(provider,bucket,storage_key)`；保留源对象、源配置和备份窗口。回退时将这些记录指回仍保留的源对象，并把默认 provider 改回 `local`。详细的 OAuth、Token 密钥轮换、断开连接、卸载和故障处理见 [Cloudreve 媒体运行手册](cloudreve-media.md)。
 
+Cloudreve 文件和 storage policy 不在本项目的数据库/Local 卷备份归档内。启用前必须按 [Cloudreve 媒体运行手册](cloudreve-media.md#灾难恢复与外部数据) 配置外部备份、retention/PITR 和恢复后的对象定位核对。
+
 ## 上线检查
 
 在测试桶使用未提交的真实变量运行：

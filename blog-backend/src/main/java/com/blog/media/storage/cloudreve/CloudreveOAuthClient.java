@@ -31,8 +31,8 @@ import java.util.concurrent.TimeoutException;
 /** Secret-safe HTTP client for the Cloudreve v4 OAuth contracts. */
 @Component
 public class CloudreveOAuthClient {
-    static final String REQUESTED_SCOPE = "openid profile offline_access Files.Write";
-    private static final Set<String> REQUIRED_SCOPES = Set.of("offline_access", "Files.Write");
+    static final String REQUESTED_SCOPE = "openid profile offline_access Files.Read Files.Write";
+    private static final Set<String> REQUIRED_SCOPES = Set.of("offline_access", "Files.Read", "Files.Write");
     private static final int MAX_RESPONSE_BYTES = 64 * 1024;
     // Cloudreve v4's refresh endpoint maps an unusable refresh token to serializer.CodeCredentialInvalid.
     private static final int CLOUDREVE_CREDENTIAL_INVALID = 40020;

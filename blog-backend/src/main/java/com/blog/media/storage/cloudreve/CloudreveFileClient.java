@@ -123,7 +123,7 @@ public class CloudreveFileClient {
             List<String> etags = uploadChunks(session, request, content);
             if (usesS3Multipart(session)) {
                 completeS3Multipart(session, etags);
-                sendUploadCallback(endpoint("/api/v4/callback/" + pathSegment(session.policyType()) + "/"
+                sendUploadCallback(uploadCallbackEndpoint("/" + pathSegment(session.policyType()) + "/"
                         + pathSegment(session.id()) + "/" + pathSegment(session.callbackSecret())));
             }
             finalized = true;
@@ -143,7 +143,7 @@ public class CloudreveFileClient {
 
     public CloudreveFileMetadata inspect(String path) {
         String uri = fileUri(requirePath(path));
-        URI endpoint = endpoint("/api/v4/file/info?uri=" + encodeQuery(uri));
+        URI endpoint = apiEndpoint("/file/info?uri=" + encodeQuery(uri));
         JsonNode data = sendApi("GET", endpoint, null, true, true);
         try {
             if (data.path("type").asInt(-1) != 0) throw malformed();
@@ -169,7 +169,7 @@ public class CloudreveFileClient {
         request.put("redirect", false);
         request.put("archive", false);
         request.put("no_cache", true);
-        JsonNode data = sendApi("POST", endpoint("/api/v4/file/url"), request, true, true);
+        JsonNode data = sendApi("POST", apiEndpoint("/file/url"), request, true, true);
         JsonNode urls = data.path("urls");
         if (!urls.isArray() || urls.size() != 1) throw malformed();
         URI contentUri = parseAllowedUri(requiredText(urls.get(0), "url"));
@@ -182,7 +182,7 @@ public class CloudreveFileClient {
         request.put("uris", List.of(uri));
         request.put("unlink", false);
         request.put("skip_soft_delete", true);
-        sendApi("DELETE", endpoint("/api/v4/file"), request, false, true);
+        sendApi("DELETE", apiEndpoint("/file"), request, false, true);
     }
 
     private void createParentDirectories(String relativePath) {
@@ -197,7 +197,7 @@ public class CloudreveFileClient {
             request.put("type", "folder");
             request.put("uri", logicalUri(path.toString()));
             request.put("err_on_conflict", false);
-            sendApi("POST", endpoint("/api/v4/file/create"), request, false, true, true);
+            sendApi("POST", apiEndpoint("/file/create"), request, false, true, true);
         }
     }
 
@@ -208,7 +208,7 @@ public class CloudreveFileClient {
         body.put("policy_id", properties.getPolicyId());
         body.put("mime_type", request.contentType());
         body.put("metadata", Map.of(MIME_METADATA_KEY, request.contentType()));
-        JsonNode data = sendApi("PUT", endpoint("/api/v4/file/upload"), body, true, true);
+        JsonNode data = sendApi("PUT", apiEndpoint("/file/upload"), body, true, true);
         String recoverableSessionId = recoverableText(data, "session_id");
         try {
             JsonNode policy = data.path("storage_policy");
@@ -346,7 +346,7 @@ public class CloudreveFileClient {
         String authorization = null;
         String method;
         if (usesRelay(session)) {
-            target = endpoint("/api/v4/file/upload/" + pathSegment(session.id()) + "/" + index);
+            target = apiEndpoint("/file/upload/" + pathSegment(session.id()) + "/" + index);
             authorization = "Bearer " + accessToken();
             method = "POST";
         } else if ("remote".equals(session.policyType())) {
@@ -445,7 +445,7 @@ public class CloudreveFileClient {
 
     private void abortQuietly(String sessionId, String fileUri) {
         try {
-            sendApi("DELETE", endpoint("/api/v4/file/upload"),
+            sendApi("DELETE", apiEndpoint("/file/upload"),
                     Map.of("id", sessionId, "uri", fileUri), false, true);
         } catch (RuntimeException ignored) {
             // The original upload failure remains authoritative.
@@ -661,9 +661,9 @@ public class CloudreveFileClient {
         }
     }
 
-    private URI endpoint(String pathAndQuery) {
-        return properties.getBaseUrl().resolve(pathAndQuery);
-    }
+    private URI apiEndpoint(String pathAndQuery) { return properties.apiEndpoint(pathAndQuery); }
+
+    private URI uploadCallbackEndpoint(String pathAndQuery) { return properties.uploadCallbackEndpoint(pathAndQuery); }
 
     private String fileUri(String relativePath) {
         String root = properties.getRootPath();

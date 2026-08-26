@@ -25,6 +25,20 @@ class CloudrevePropertiesTest {
     }
 
     @Test
+    void preservesTheBaseAndConfiguredApiPrefixesForOAuthFileAndCallbackPaths() {
+        CloudreveProperties properties = configuredProperties();
+        properties.setBaseUrl(URI.create("https://cloud.example/cloudreve"));
+        properties.setApiBasePath("/v4-api");
+        properties.setUploadCallbackBasePath("/v4-callback");
+
+        assertThat(properties.tokenUri()).isEqualTo(URI.create("https://cloud.example/cloudreve/v4-api/session/oauth/token"));
+        assertThat(properties.apiEndpoint("/file/info?uri=cloudreve%3A%2F%2Fmy%2Fblog"))
+                .isEqualTo(URI.create("https://cloud.example/cloudreve/v4-api/file/info?uri=cloudreve%3A%2F%2Fmy%2Fblog"));
+        assertThat(properties.uploadCallbackEndpoint("/s3/session/callback"))
+                .isEqualTo(URI.create("https://cloud.example/cloudreve/v4-callback/s3/session/callback"));
+    }
+
+    @Test
     void usesExplicitOAuthEndpointOverrides() {
         CloudreveProperties properties = configuredProperties();
         properties.setAuthorizationUri(URI.create("https://identity.example:9443/authorize"));

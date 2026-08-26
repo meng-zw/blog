@@ -146,7 +146,7 @@ class CloudreveTokenServiceTest {
         assertThat(saved.getAuthorizedDisplayName()).isEqualTo("New User");
         assertThat(fixture.decrypt(saved, "access")).isEqualTo("new-access");
         assertThat(fixture.decrypt(saved, "refresh")).isEqualTo("new-refresh");
-        assertThat(saved.getGrantedScopes()).isEqualTo("Files.Write offline_access openid profile");
+        assertThat(saved.getGrantedScopes()).isEqualTo("Files.Read Files.Write offline_access openid profile");
     }
 
     @Test
@@ -535,7 +535,7 @@ class CloudreveTokenServiceTest {
 
         CloudreveOAuthClient.TokenPair pair(String access, String refresh) {
             return new CloudreveOAuthClient.TokenPair(access, refresh, NOW.plusSeconds(600), NOW.plusSeconds(1200),
-                    List.of("openid", "profile", "offline_access", "Files.Write"));
+                    List.of("openid", "profile", "offline_access", "Files.Read", "Files.Write"));
         }
 
         String decrypt(CloudreveConnection connection, String type) {
@@ -596,7 +596,7 @@ class CloudreveTokenServiceTest {
             value.setRefreshTokenCiphertext(encryptedRefresh.ciphertext());
             value.setAccessTokenExpiresAt(accessExpiry);
             value.setRefreshTokenExpiresAt(refreshExpiry);
-            value.setGrantedScopes("Files.Write offline_access openid profile");
+            value.setGrantedScopes("Files.Read Files.Write offline_access openid profile");
             value.setStatus(CloudreveConnectionStatus.CONNECTED);
             connection.set(value);
         }

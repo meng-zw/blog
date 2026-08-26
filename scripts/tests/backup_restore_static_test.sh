@@ -85,11 +85,7 @@ for variable in \
   BLOG_MEDIA_CLOUDREVE_CLIENT_ID \
   BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET \
   BLOG_MEDIA_CLOUDREVE_POLICY_ID \
-  BLOG_MEDIA_CLOUDREVE_ROOT_PATH \
-  BLOG_MEDIA_TOKEN_ENCRYPTION_KEY \
-  BLOG_MEDIA_CLOUDREVE_ALLOW_TRUSTED_INTERNAL_HTTP \
-  BLOG_MEDIA_CLOUDREVE_CONNECT_TIMEOUT \
-  BLOG_MEDIA_CLOUDREVE_REQUEST_TIMEOUT; do
+  BLOG_MEDIA_TOKEN_ENCRYPTION_KEY; do
   grep -Fq "$variable: \${$variable:-}" "$compose_file"
   grep -q "^$variable=" "$production_env"
 done
@@ -97,6 +93,17 @@ grep -Eq '^BLOG_MEDIA_CLOUDREVE_CLIENT_ID=$' "$production_env"
 grep -Eq '^BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET=$' "$production_env"
 grep -Eq '^BLOG_MEDIA_TOKEN_ENCRYPTION_KEY=$' "$production_env"
 grep -Eq '^BLOG_MEDIA_CLOUDREVE_ALLOW_TRUSTED_INTERNAL_HTTP=false$' "$production_env"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_ALLOW_TRUSTED_INTERNAL_HTTP: ${BLOG_MEDIA_CLOUDREVE_ALLOW_TRUSTED_INTERNAL_HTTP:-false}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_API_BASE_PATH: ${BLOG_MEDIA_CLOUDREVE_API_BASE_PATH:-/api/v4}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_UPLOAD_CALLBACK_BASE_PATH: ${BLOG_MEDIA_CLOUDREVE_UPLOAD_CALLBACK_BASE_PATH:-/api/v4/callback}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_ROOT_PATH: ${BLOG_MEDIA_CLOUDREVE_ROOT_PATH:-/blog}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_CONNECT_TIMEOUT: ${BLOG_MEDIA_CLOUDREVE_CONNECT_TIMEOUT:-5s}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_REQUEST_TIMEOUT: ${BLOG_MEDIA_CLOUDREVE_REQUEST_TIMEOUT:-30s}' "$compose_file"
+grep -Eq '^BLOG_MEDIA_CLOUDREVE_API_BASE_PATH=/api/v4$' "$production_env"
+grep -Eq '^BLOG_MEDIA_CLOUDREVE_UPLOAD_CALLBACK_BASE_PATH=/api/v4/callback$' "$production_env"
+grep -Eq '^BLOG_MEDIA_CLOUDREVE_ROOT_PATH=/blog$' "$production_env"
+grep -Eq '^BLOG_MEDIA_CLOUDREVE_CONNECT_TIMEOUT=5s$' "$production_env"
+grep -Eq '^BLOG_MEDIA_CLOUDREVE_REQUEST_TIMEOUT=30s$' "$production_env"
 
 # Compose must retain API-side callback and endpoint overrides exactly as
 # environment interpolation, rather than baking a Cloudreve host or callback
@@ -112,13 +119,27 @@ grep -Fq 'BLOG_MEDIA_CLOUDREVE_AUTHORIZATION_URI: ${BLOG_MEDIA_CLOUDREVE_AUTHORI
 grep -Fq 'BLOG_MEDIA_CLOUDREVE_TOKEN_URI: ${BLOG_MEDIA_CLOUDREVE_TOKEN_URI:-}' "$compose_file"
 grep -Fq 'BLOG_MEDIA_CLOUDREVE_REFRESH_URI: ${BLOG_MEDIA_CLOUDREVE_REFRESH_URI:-}' "$compose_file"
 grep -Fq 'BLOG_MEDIA_CLOUDREVE_USERINFO_URI: ${BLOG_MEDIA_CLOUDREVE_USERINFO_URI:-}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_API_BASE_PATH: ${BLOG_MEDIA_CLOUDREVE_API_BASE_PATH:-/api/v4}' "$compose_file"
+grep -Fq 'BLOG_MEDIA_CLOUDREVE_UPLOAD_CALLBACK_BASE_PATH: ${BLOG_MEDIA_CLOUDREVE_UPLOAD_CALLBACK_BASE_PATH:-/api/v4/callback}' "$compose_file"
+grep -Fq 'Files.Read' "$repo_dir/blog-backend/src/main/java/com/blog/media/storage/cloudreve/CloudreveOAuthClient.java"
+grep -Fq 'Files.Read' "$repo_dir/docs/cloudreve-media.md"
 
 # Example configuration is intentionally credential-free and must not grow a
 # concrete Cloudreve endpoint (including a private instance address).
 ! rg -n '^BLOG_MEDIA_CLOUDREVE_(BASE_URL|AUTHORIZATION_URI|TOKEN_URI|REFRESH_URI|USERINFO_URI|REDIRECT_URI|CLIENT_ID|CLIENT_SECRET|POLICY_ID)=.+$' "$production_env"
 ! rg -n '^BLOG_MEDIA_TOKEN_ENCRYPTION_KEY=.+$' "$production_env"
-! rg -n 'https?://([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]{1,5})?' \
-  "$compose_file" "$production_env" "$repo_dir/docs/cloudreve-media.md"
+# Scan all tracked Cloudreve deployment/configuration sources, not just the
+# example file. Existing unrelated loopback health checks and synthetic DTO
+# fixtures are intentionally outside this scoped scan; Cloudreve locations
+# must remain variables/placeholders, never concrete IP endpoints or secrets.
+! git -C "$repo_dir" grep -nE 'BLOG_MEDIA_CLOUDREVE_(BASE_URL|AUTHORIZATION_URI|TOKEN_URI|REFRESH_URI|USERINFO_URI|REDIRECT_URI|CLIENT_ID|CLIENT_SECRET|POLICY_ID)=[^[:space:]]+' -- .env.example
+! git -C "$repo_dir" grep -nE 'https?://([0-9]{1,3}\.){3}[0-9]{1,3}(:[0-9]{1,5})?' -- \
+  docs/cloudreve-media.md blog-backend/src/main/java/com/blog/media/storage/cloudreve
+! git -C "$repo_dir" grep -nE '(ACCESS_TOKEN|REFRESH_TOKEN|CLIENT_SECRET|BLOG_MEDIA_TOKEN_ENCRYPTION_KEY)=[^[:space:]]+' -- \
+  .env.example docker-compose.yml docs/cloudreve-media.md README.md docs
+grep -Fq 'Cloudreve/storage-policy backup' "$repo_dir/docs/cloudreve-media.md"
+grep -Fq 'retention/PITR' "$repo_dir/docs/cloudreve-media.md"
+grep -Fq 'post-restore reconciliation' "$repo_dir/docs/cloudreve-media.md"
 
 # R2 always uses S3's required `auto` region internally. Neither base nor
 # production configuration may reintroduce a user-configurable region value.

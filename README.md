@@ -80,7 +80,7 @@ npm run lint:legacy-routes
 - `BLOG_MEDIA_PROVIDER`：`local`（默认）、`r2` 或 `cloudreve`；只决定新上传位置，历史对象仍按记录的 provider 读取
 - `BLOG_MEDIA_LOCAL_DIRECTORY`：Local 媒体存储目录
 - `BLOG_MEDIA_R2_*`：R2 仅由 API 读取的账户、桶、S3 endpoint 与公开域名变量
-- `BLOG_MEDIA_CLOUDREVE_*` / `BLOG_MEDIA_TOKEN_ENCRYPTION_KEY`：Cloudreve OAuth、文件空间和 Token 加密配置，仅注入 API 容器
+- `BLOG_MEDIA_CLOUDREVE_*` / `BLOG_MEDIA_TOKEN_ENCRYPTION_KEY`：Cloudreve OAuth、文件空间、反向代理 API/回调路径和 Token 加密配置，仅注入 API 容器
 - `MEDIA_UPLOAD_ORIGIN` / `MEDIA_PUBLIC_ORIGINS`：Web 容器 CSP 使用的精确 HTTPS R2 上传与图片 origin
 - `BLOG_MEDIA_UPLOAD_PLAN_RATE_LIMIT_*`：单实例上传计划限流参数（多 API 节点需替换为共享限流器）
 - `BLOG_ADMIN_USERNAME`：首次启动时创建的管理员用户名

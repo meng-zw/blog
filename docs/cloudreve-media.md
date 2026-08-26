@@ -15,7 +15,7 @@ Local 是默认值。只有把 `BLOG_MEDIA_PROVIDER=cloudreve` 用于新上传�
 
 1. 在目标 Cloudreve v4 实例创建一个只供博客使用的 OAuth 应用，使用 Authorization Code + PKCE，不复用管理后台或其他应用的 Client ID。
 2. 将下面的**完整且精确**回调地址登记为 Redirect URI：`https://blog.example.com/api/admin/media/cloudreve/callback`。实际域名和路径以 `BLOG_MEDIA_CLOUDREVE_REDIRECT_URI` 为准；不要使用通配符、fragment、URL 中的凭据或临时测试回调。反向代理必须将该路径转发至 API，并保持管理员会话 cookie。
-3. 应用请求 `openid profile offline_access Files.Write`。代码强制要求 `offline_access`（刷新 Token）和 `Files.Write`（文件操作）；`openid profile` 用于核对并显示授权身份。不要预先授予管理权限。若真实实例拒绝读取、下载或删除并明确要求额外 scope（例如 `Files.Read`），记录实例返回的精确要求，停止发布，并只为专用 OAuth 应用增加该最小 scope 后重测。
+3. 应用请求 `openid profile offline_access Files.Read Files.Write`。代码强制要求 `offline_access`（刷新 Token）、`Files.Read`（`/api/v4/file` 的信息、读取、下载与删除）和 `Files.Write`（创建、上传与写入）；`openid profile` 用于核对并显示授权身份。不要预先授予管理权限。真实实例如要求其他 scope，记录精确要求，停止发布，并只为专用 OAuth 应用增加该最小 scope 后重测。
 4. 在 Cloudreve 为 OAuth 授权用户选择或创建博客专用根目录，例如 `/blog`。授予此用户该目录及其子目录所需的创建、写入、查询、读取和删除权限；不要把根目录设为可写的整个个人文件空间。记录 Cloudreve 的 storage policy ID，填写到 `BLOG_MEDIA_CLOUDREVE_POLICY_ID`。政策、根目录或权限不足通常会在首次上传/读取时失败。
 5. 将 Client ID、Client Secret 和 token 加密密钥存入部署密钥系统。任何测试 Client Secret 都必须在生产上线前在 Cloudreve 中轮换：测试环境、浏览器历史、截图、CI 或聊天记录都可能已经暴露过它，不能作为生产密钥使用。
 
@@ -27,12 +27,14 @@ Local 是默认值。只有把 `BLOG_MEDIA_PROVIDER=cloudreve` 用于新上传�
 | --- | --- |
 | `BLOG_MEDIA_PROVIDER` | `local`（默认）、`r2` 或 `cloudreve`；只决定新上传位置。 |
 | `BLOG_MEDIA_CLOUDREVE_ENABLED` | `false` 默认；设为 `true` 可在默认 provider 不是 Cloudreve 时保留历史 Cloudreve 读取能力。 |
-| `BLOG_MEDIA_CLOUDREVE_BASE_URL` | Cloudreve 的绝对基础 URL。留空的 OAuth endpoint 会从它解析。生产必须是 HTTPS、无凭据、无 query/fragment。 |
-| `BLOG_MEDIA_CLOUDREVE_AUTHORIZATION_URI` | 可选绝对授权 endpoint；空值使用 `/session/authorize`。 |
-| `BLOG_MEDIA_CLOUDREVE_TOKEN_URI` | 可选绝对换码 endpoint；空值使用 `/api/v4/session/oauth/token`。 |
-| `BLOG_MEDIA_CLOUDREVE_REFRESH_URI` | 可选绝对刷新 endpoint；空值使用 `/api/v4/session/token/refresh`。 |
-| `BLOG_MEDIA_CLOUDREVE_USERINFO_URI` | 可选绝对用户信息 endpoint；空值使用 `/api/v4/session/oauth/userinfo`。 |
+| `BLOG_MEDIA_CLOUDREVE_BASE_URL` | Cloudreve 的绝对基础 URL；可包含反向代理路径前缀。留空的 endpoint 会在保留该前缀的前提下解析。生产必须是 HTTPS、无凭据、无 query/fragment。 |
+| `BLOG_MEDIA_CLOUDREVE_AUTHORIZATION_URI` | 可选绝对授权 endpoint；空值使用相对 `BASE_URL` 的 `/session/authorize`。 |
+| `BLOG_MEDIA_CLOUDREVE_TOKEN_URI` | 可选绝对换码 endpoint；空值使用 API base path 下的 `/session/oauth/token`。 |
+| `BLOG_MEDIA_CLOUDREVE_REFRESH_URI` | 可选绝对刷新 endpoint；空值使用 API base path 下的 `/session/token/refresh`。 |
+| `BLOG_MEDIA_CLOUDREVE_USERINFO_URI` | 可选绝对用户信息 endpoint；空值使用 API base path 下的 `/session/oauth/userinfo`。 |
 | `BLOG_MEDIA_CLOUDREVE_REDIRECT_URI` | 已登记的完整博客回调 URL，通常为 `https://blog.example.com/api/admin/media/cloudreve/callback`。 |
+| `BLOG_MEDIA_CLOUDREVE_API_BASE_PATH` | Cloudreve v4 API 相对路径，默认 `/api/v4`；文件 API 和默认 token/refresh/userinfo 路径均使用它。 |
+| `BLOG_MEDIA_CLOUDREVE_UPLOAD_CALLBACK_BASE_PATH` | Cloudreve 上传完成 callback 相对路径，默认 `/api/v4/callback`。 |
 | `BLOG_MEDIA_CLOUDREVE_CLIENT_ID` / `BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET` | OAuth 应用凭据；仅从密钥系统注入。 |
 | `BLOG_MEDIA_CLOUDREVE_POLICY_ID` | Cloudreve storage policy 的稳定 ID，不能填名称猜测值。 |
 | `BLOG_MEDIA_CLOUDREVE_ROOT_PATH` | 逻辑绝对根目录，默认 `/blog`；不允许 `..`、反斜杠或控制字符。 |
@@ -40,7 +42,7 @@ Local 是默认值。只有把 `BLOG_MEDIA_PROVIDER=cloudreve` 用于新上传�
 | `BLOG_MEDIA_CLOUDREVE_ALLOW_TRUSTED_INTERNAL_HTTP` | 生产固定 `false`；仅隔离开发环境可以显式设为 `true`。 |
 | `BLOG_MEDIA_CLOUDREVE_CONNECT_TIMEOUT` / `BLOG_MEDIA_CLOUDREVE_REQUEST_TIMEOUT` | 可选正时长，默认 `5s` / `30s`。 |
 
-端点可单独覆盖，以支持反向代理路径、域名或端口变化；不要在应用代码、Compose、Nginx 或前端中硬编码它们。默认 endpoint 仅适用于未被实例定制的 Cloudreve v4 安装。
+端点可单独覆盖，以支持反向代理路径、域名或端口变化；也可只改 API/callback base path。应用会把 `BASE_URL` 的路径前缀、`API_BASE_PATH` 或 `UPLOAD_CALLBACK_BASE_PATH` 与具体 endpoint 拼接，不会像普通 `URI.resolve("/...")` 那样丢掉代理前缀。两条 path 都必须为不含 query、fragment、反斜杠或 `..` 的绝对逻辑路径。不要在应用代码、Compose、Nginx 或前端中硬编码实例位置。默认 endpoint 仅适用于未被实例定制的 Cloudreve v4 安装。
 
 生成 Token 加密密钥时，在受控管理员工作站运行以下命令并直接保存输出到密钥系统，绝不把输出粘贴到 issue、终端录屏或仓库：
 
@@ -62,6 +64,14 @@ openssl rand -base64 32
 轮换 Client Secret：在 Cloudreve 创建或轮换专用应用密钥，将新值更新到密钥系统，滚动重启 API，并用非生产或维护窗口完成连接/重新授权、上传、匿名读取和删除未引用媒体的验证；确认正常后再撤销旧值。泄露时立刻撤销旧 Client Secret、审计授权记录并重新授权。
 
 轮换 Token 加密密钥需要计划维护：先备份数据库并安全保管旧密钥；替换 `BLOG_MEDIA_TOKEN_ENCRYPTION_KEY` 后，旧 Token 密文不能由新实例读取，连接会要求重新授权。完成重新授权和媒体读取验证后再按密钥保留策略销毁旧密钥。恢复历史数据库备份时，必须恢复与其对应的旧密钥；不要用新密钥尝试解密旧备份。
+
+## 灾难恢复与外部数据
+
+项目随附的备份/恢复归档只覆盖数据库和 Local `media-data` 卷，**不**包含 Cloudreve 文件、Cloudreve/storage policy backup、OAuth 应用设置或其底层对象存储。Cloudreve 接入上线前，运维必须在 Cloudreve/底层存储侧建立独立的 Cloudreve/storage-policy backup，并确认对象版本、权限/策略配置和 OAuth 应用可恢复。
+
+为该外部备份定义并演练 retention/PITR：保留时长、版本/快照频率、恢复负责人、异地副本和删除保护必须与数据库备份窗口匹配或更长。数据库、Local 卷、Cloudreve 对象和 Token 加密密钥的恢复点不一致时，先在隔离环境恢复，不要直接切换生产。
+
+每次数据库恢复或 Cloudreve/storage policy 恢复后，完成 post-restore reconciliation：核对 `media_asset` 中的 Cloudreve provider/location 与远端根目录、policy、对象存在性、类型、大小和 ETag；抽样验证匿名稳定图片/附件读取，并确认 OAuth 连接可重新授权。对缺失或不一致对象保留记录和审计证据，暂停上传并按迁移/回退流程修复，不能把它们误标为已删除。
 
 ## Provider 切换、迁移、回退与卸载
 
@@ -85,7 +95,7 @@ openssl rand -base64 32
 
 自动测试和 Compose 静态检查只能验证配置边界，不能证明具体 Cloudreve 实例的 OAuth、scope 或 storage policy。使用未提交的非生产 Client ID/Secret 和文件空间，在生产发布前记录**脱敏**结果：
 
-1. 完成 OAuth，验证回调回到博客后台、已授权身份和授予 scope；如果缺少额外 read scope，停止并记录精确 scope。
+1. 完成 OAuth，验证回调回到博客后台、已授权身份和授予的 `Files.Read`、`Files.Write`、`offline_access` scope；如果实例要求其他 scope，停止并记录精确 scope。
 2. 上传 PNG 与小型公开附件，完成校验，发布后用未登录窗口验证图片和附件下载；确认对象位于配置根目录。
 3. 验证 Access Token 自动刷新；短暂中断 Cloudreve 后确认返回可重试 503 且没有误删，再恢复并重试。
 4. 删除一条未引用测试媒体，确认 Cloudreve 文件消失；把默认 provider 切回 Local，确认历史 Cloudreve 媒体仍可读取。

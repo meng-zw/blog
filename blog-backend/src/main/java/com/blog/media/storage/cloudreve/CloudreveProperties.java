@@ -18,6 +18,8 @@ public class CloudreveProperties {
     private URI refreshUri;
     private URI userInfoUri;
     private URI redirectUri;
+    private String apiBasePath = "/api/v4";
+    private String uploadCallbackBasePath = "/api/v4/callback";
     private String clientId;
     private String clientSecret;
     private String policyId;
@@ -42,6 +44,12 @@ public class CloudreveProperties {
     public void setUserInfoUri(URI userInfoUri) { this.userInfoUri = userInfoUri; }
     public URI getRedirectUri() { return redirectUri; }
     public void setRedirectUri(URI redirectUri) { this.redirectUri = redirectUri; }
+    public String getApiBasePath() { return apiBasePath; }
+    public void setApiBasePath(String apiBasePath) { this.apiBasePath = normalizeEndpointPath(apiBasePath); }
+    public String getUploadCallbackBasePath() { return uploadCallbackBasePath; }
+    public void setUploadCallbackBasePath(String uploadCallbackBasePath) {
+        this.uploadCallbackBasePath = normalizeEndpointPath(uploadCallbackBasePath);
+    }
     public String getClientId() { return clientId; }
     public void setClientId(String clientId) { this.clientId = trimmed(clientId); }
     public String getClientSecret() { return clientSecret; }
@@ -66,9 +74,11 @@ public class CloudreveProperties {
     }
 
     public URI authorizationUri() { return overrideOrResolve(authorizationUri, "/session/authorize"); }
-    public URI tokenUri() { return overrideOrResolve(tokenUri, "/api/v4/session/oauth/token"); }
-    public URI refreshUri() { return overrideOrResolve(refreshUri, "/api/v4/session/token/refresh"); }
-    public URI userInfoUri() { return overrideOrResolve(userInfoUri, "/api/v4/session/oauth/userinfo"); }
+    public URI tokenUri() { return overrideOrResolve(tokenUri, apiBasePath + "/session/oauth/token"); }
+    public URI refreshUri() { return overrideOrResolve(refreshUri, apiBasePath + "/session/token/refresh"); }
+    public URI userInfoUri() { return overrideOrResolve(userInfoUri, apiBasePath + "/session/oauth/userinfo"); }
+    public URI apiEndpoint(String pathAndQuery) { return resolveUnder(apiBasePath, pathAndQuery); }
+    public URI uploadCallbackEndpoint(String pathAndQuery) { return resolveUnder(uploadCallbackBasePath, pathAndQuery); }
 
     /** Validates settings only when Cloudreve is enabled for reads or selected for new uploads. */
     public void validate() {
@@ -86,6 +96,8 @@ public class CloudreveProperties {
         validateUri(refreshUri(), "Cloudreve refresh URI");
         validateUri(userInfoUri(), "Cloudreve userinfo URI");
         validateUri(redirectUri, "Cloudreve redirect URI");
+        validateEndpointPath(apiBasePath, "Cloudreve API base path");
+        validateEndpointPath(uploadCallbackBasePath, "Cloudreve upload callback base path");
         validateTimeout(connectTimeout, "Cloudreve connect timeout");
         validateTimeout(requestTimeout, "Cloudreve request timeout");
         validateRootPath(rootPath);
@@ -96,10 +108,26 @@ public class CloudreveProperties {
 
     private URI overrideOrResolve(URI override, String defaultPath) {
         if (override != null) return override;
+        return resolveUnder("/", defaultPath);
+    }
+
+    private URI resolveUnder(String configuredBasePath, String pathAndQuery) {
         if (baseUrl == null) {
             throw new IllegalArgumentException("Cloudreve base URL is required when OAuth endpoints are not configured");
         }
-        return baseUrl.resolve(defaultPath);
+        if (pathAndQuery == null || pathAndQuery.isBlank() || !pathAndQuery.startsWith("/")) {
+            throw new IllegalArgumentException("Cloudreve endpoint path must be absolute");
+        }
+        int queryStart = pathAndQuery.indexOf('?');
+        String suffix = queryStart < 0 ? pathAndQuery : pathAndQuery.substring(0, queryStart);
+        String query = queryStart < 0 ? null : pathAndQuery.substring(queryStart + 1);
+        String path = joinPaths(baseUrl.getRawPath(), configuredBasePath, suffix);
+        try {
+            URI withoutQuery = new URI(baseUrl.getScheme(), baseUrl.getRawAuthority(), path, null, null);
+            return query == null ? withoutQuery : URI.create(withoutQuery.toASCIIString() + "?" + query);
+        } catch (java.net.URISyntaxException | IllegalArgumentException exception) {
+            throw new IllegalArgumentException("Cloudreve endpoint path is invalid", exception);
+        }
     }
 
     private void validateUri(URI uri, String name) {
@@ -157,6 +185,19 @@ public class CloudreveProperties {
         }
     }
 
+    private static void validateEndpointPath(String path, String name) {
+        if (path == null || path.isBlank() || !path.startsWith("/") || path.contains("\\")
+                || path.indexOf('?') >= 0 || path.indexOf('#') >= 0
+                || path.chars().anyMatch(Character::isISOControl)) {
+            throw new IllegalArgumentException(name + " must be a normalized absolute path");
+        }
+        for (String segment : path.split("/")) {
+            if ("..".equals(segment) || ".".equals(segment)) {
+                throw new IllegalArgumentException(name + " must not contain traversal segments");
+            }
+        }
+    }
+
     private void validateProviderOrigin(URI uri) {
         validateUri(uri, "Cloudreve provider origin");
         String path = uri.getRawPath();
@@ -172,6 +213,30 @@ public class CloudreveProperties {
         if (!normalized.startsWith("/")) normalized = "/" + normalized;
         return normalized.length() > 1 && normalized.endsWith("/")
                 ? normalized.substring(0, normalized.length() - 1) : normalized;
+    }
+
+    private static String normalizeEndpointPath(String value) {
+        String trimmed = trimmed(value);
+        if (trimmed == null || trimmed.isEmpty()) return trimmed;
+        String normalized = trimmed.replaceAll("/+", "/");
+        if (!normalized.startsWith("/")) normalized = "/" + normalized;
+        return normalized.length() > 1 && normalized.endsWith("/")
+                ? normalized.substring(0, normalized.length() - 1) : normalized;
+    }
+
+    private static String joinPaths(String... paths) {
+        StringBuilder joined = new StringBuilder();
+        for (String value : paths) {
+            if (value == null || value.isBlank() || "/".equals(value)) continue;
+            if (joined.isEmpty()) joined.append('/');
+            else if (joined.charAt(joined.length() - 1) != '/') joined.append('/');
+            int first = 0;
+            while (first < value.length() && value.charAt(first) == '/') first++;
+            int last = value.length();
+            while (last > first && value.charAt(last - 1) == '/') last--;
+            joined.append(value, first, last);
+        }
+        return joined.isEmpty() ? "/" : joined.toString();
     }
 
     private static void requireText(String value, String message) {

@@ -54,7 +54,7 @@ class CloudreveOAuthClientTest {
         assertThat(query).containsEntry("response_type", "code")
                 .containsEntry("client_id", "client-id")
                 .containsEntry("redirect_uri", "https://blog.example/oauth/callback")
-                .containsEntry("scope", "openid profile offline_access Files.Write")
+                .containsEntry("scope", "openid profile offline_access Files.Read Files.Write")
                 .containsEntry("state", "state-value")
                 .containsEntry("code_challenge_method", "S256");
         assertThat(query.get("code_challenge"))
@@ -68,7 +68,7 @@ class CloudreveOAuthClientTest {
         http.enqueue(200, """
                 {"access_token":"access","refresh_token":"refresh","token_type":"Bearer",
                  "expires_in":3600,"refresh_token_expires_in":7200,
-                 "scope":"openid profile offline_access Files.Write"}
+                 "scope":"openid profile offline_access Files.Read Files.Write"}
                 """);
 
         CloudreveOAuthClient.TokenPair pair = client(http).exchangeCode("code a&b", "verifier");
@@ -85,15 +85,15 @@ class CloudreveOAuthClientTest {
         assertThat(pair.refreshToken()).isEqualTo("refresh");
         assertThat(pair.accessExpiresAt()).isEqualTo(NOW.plusSeconds(3600));
         assertThat(pair.refreshExpiresAt()).isEqualTo(NOW.plusSeconds(7200));
-        assertThat(pair.scopes()).containsExactlyInAnyOrder("openid", "profile", "offline_access", "Files.Write");
+        assertThat(pair.scopes()).containsExactlyInAnyOrder("openid", "profile", "offline_access", "Files.Read", "Files.Write");
     }
 
     @Test
-    void rejectsExchangeWhenReturnedScopeOmitsWriteOrOfflineAccess() {
+    void rejectsExchangeWhenReturnedScopeOmitsReadWriteOrOfflineAccess() {
         StubHttpClient http = new StubHttpClient();
         http.enqueue(200, """
                 {"access_token":"access","refresh_token":"refresh","token_type":"Bearer",
-                 "expires_in":3600,"refresh_token_expires_in":7200,"scope":"openid profile"}
+                 "expires_in":3600,"refresh_token_expires_in":7200,"scope":"openid profile offline_access Files.Write"}
                 """);
 
         assertThatThrownBy(() -> client(http).exchangeCode("code", "verifier"))
@@ -125,13 +125,13 @@ class CloudreveOAuthClientTest {
                  "access_expires":"2026-08-24T01:00:00Z","refresh_expires":"2026-09-24T00:00:00Z"},"msg":""}
                 """);
 
-        CloudreveOAuthClient.TokenPair pair = client(http).refresh("old-refresh", List.of("offline_access", "Files.Write"));
+        CloudreveOAuthClient.TokenPair pair = client(http).refresh("old-refresh", requiredScopes());
 
         assertThat(http.requests.getFirst().headers().firstValue("Content-Type")).hasValue("application/json");
         assertThat(http.bodies.getFirst()).isEqualTo("{\"refresh_token\":\"old-refresh\"}");
         assertThat(pair.accessToken()).isEqualTo("new-access");
         assertThat(pair.refreshToken()).isEqualTo("new-refresh");
-        assertThat(pair.scopes()).containsExactly("offline_access", "Files.Write");
+        assertThat(pair.scopes()).containsExactlyElementsOf(requiredScopes());
     }
 
     @Test
@@ -143,13 +143,13 @@ class CloudreveOAuthClientTest {
         StubHttpClient unavailable = new StubHttpClient();
         unavailable.enqueue(503, "sensitive-provider-body");
 
-        assertThatThrownBy(() -> client(invalid).refresh("refresh", List.of("offline_access", "Files.Write")))
+        assertThatThrownBy(() -> client(invalid).refresh("refresh", requiredScopes()))
                 .isInstanceOf(CloudreveOAuthClient.InvalidGrantException.class)
                 .hasMessageNotContaining("sensitive-token");
-        assertThatThrownBy(() -> client(cloudreveInvalid).refresh("refresh", List.of("offline_access", "Files.Write")))
+        assertThatThrownBy(() -> client(cloudreveInvalid).refresh("refresh", requiredScopes()))
                 .isInstanceOf(CloudreveOAuthClient.InvalidGrantException.class)
                 .hasMessageNotContaining("sensitive-credential-detail");
-        assertThatThrownBy(() -> client(unavailable).refresh("refresh", List.of("offline_access", "Files.Write")))
+        assertThatThrownBy(() -> client(unavailable).refresh("refresh", requiredScopes()))
                 .isInstanceOf(CloudreveOAuthClient.OAuthUnavailableException.class)
                 .hasMessageNotContaining("sensitive-provider-body");
     }
@@ -192,9 +192,9 @@ class CloudreveOAuthClientTest {
         StubHttpClient malformed = new StubHttpClient();
         malformed.enqueue(200, "{not-json");
 
-        assertThatThrownBy(() -> client(empty).refresh("refresh", List.of("offline_access", "Files.Write")))
+        assertThatThrownBy(() -> client(empty).refresh("refresh", requiredScopes()))
                 .isInstanceOf(CloudreveOAuthClient.OAuthProtocolException.class);
-        assertThatThrownBy(() -> client(malformed).refresh("refresh", List.of("offline_access", "Files.Write")))
+        assertThatThrownBy(() -> client(malformed).refresh("refresh", requiredScopes()))
                 .isInstanceOf(CloudreveOAuthClient.OAuthProtocolException.class);
     }
 
@@ -209,7 +209,7 @@ class CloudreveOAuthClientTest {
         CloudreveOAuthClient client = new CloudreveOAuthClient(
                 properties, http, failingMapper, Clock.fixed(NOW, ZoneOffset.UTC));
 
-        assertThatThrownBy(() -> client.refresh("refresh", List.of("offline_access", "Files.Write")))
+        assertThatThrownBy(() -> client.refresh("refresh", requiredScopes()))
                 .isInstanceOf(CloudreveOAuthClient.OAuthProtocolException.class)
                 .hasMessageNotContaining("sensitive-provider-body");
     }
@@ -232,7 +232,7 @@ class CloudreveOAuthClientTest {
         CloudreveOAuthClient client = client(http, Duration.ofSeconds(2));
         long started = System.nanoTime();
 
-        assertThatThrownBy(() -> client.refresh("refresh", List.of("offline_access", "Files.Write"),
+        assertThatThrownBy(() -> client.refresh("refresh", requiredScopes(),
                         Duration.ofMillis(50)))
                 .isInstanceOf(CloudreveOAuthClient.OAuthUnavailableException.class);
 
@@ -256,13 +256,17 @@ class CloudreveOAuthClientTest {
     void tokenPairToStringRedactsBothCredentials() {
         CloudreveOAuthClient.TokenPair pair = new CloudreveOAuthClient.TokenPair(
                 "access-secret", "refresh-secret", NOW.plusSeconds(60), NOW.plusSeconds(120),
-                List.of("offline_access", "Files.Write"));
+                requiredScopes());
 
         assertThat(pair.toString()).doesNotContain("access-secret").doesNotContain("refresh-secret");
     }
 
     private static CloudreveOAuthClient client(HttpClient httpClient) {
         return client(httpClient, Duration.ofSeconds(3));
+    }
+
+    private static List<String> requiredScopes() {
+        return List.of("offline_access", "Files.Read", "Files.Write");
     }
 
     private static CloudreveOAuthClient client(HttpClient httpClient, Duration requestTimeout) {
