@@ -67,6 +67,7 @@ export interface CloudreveConnectionResponse {
   accessTokenExpiresAt: IsoDateTime | null
   refreshTokenExpiresAt: IsoDateTime | null
   rootPath: string
+  trustedInternalAuthorizationOrigin: string | null
 }
 
 export interface MediaUploadPlanResponse {

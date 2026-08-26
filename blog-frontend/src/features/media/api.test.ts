@@ -77,7 +77,7 @@ describe('media API', () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       configured: true, status: 'CONNECTED', authorized_subject: 'user-42', authorized_display_name: 'Cloudreve 管理员',
       granted_scopes: ['Files.Read', 'Files.Write'], access_token_expires_at: '2026-08-24T10:15:00Z',
-      refresh_token_expires_at: '2026-09-24T10:15:00Z', root_path: '/blog'
+      refresh_token_expires_at: '2026-09-24T10:15:00Z', root_path: '/blog', trusted_internal_authorization_origin: null
     }), { headers: { 'Content-Type': 'application/json' } }))
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ redirect_url: 'https://cloud.example/session/authorize' }), {
       headers: { 'Content-Type': 'application/json' }
@@ -85,7 +85,7 @@ describe('media API', () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
 
     await expect(getCloudreveConnection()).resolves.toMatchObject({
-      authorizedSubject: 'user-42', accessTokenExpiresAt: '2026-08-24T10:15:00Z', rootPath: '/blog'
+      authorizedSubject: 'user-42', accessTokenExpiresAt: '2026-08-24T10:15:00Z', rootPath: '/blog', trustedInternalAuthorizationOrigin: null
     })
     await expect(authorizeCloudreve()).resolves.toBe('https://cloud.example/session/authorize')
     await expect(disconnectCloudreve()).resolves.toBeUndefined()
@@ -95,19 +95,26 @@ describe('media API', () => {
   })
 
   it('allows a same-origin HTTP authorization redirect for a local HTTP deployment', async () => {
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ redirect_url: `${window.location.origin}/session/authorize` }), {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ redirect_url: 'http://cloudreve-internal.example:5212/session/authorize?state=opaque' }), {
       headers: { 'Content-Type': 'application/json' }
     }))
 
-    await expect(authorizeCloudreve()).resolves.toBe(`${window.location.origin}/session/authorize`)
+    await expect(authorizeCloudreve('http://cloudreve-internal.example:5212')).resolves.toBe('http://cloudreve-internal.example:5212/session/authorize?state=opaque')
   })
 
-  it.each(['javascript:alert(1)', 'data:text/html,test', '/session/authorize', 'http://cloud.example/session/authorize', 'https://user:password@cloud.example/session/authorize'])
-  ('rejects an unsafe Cloudreve authorization redirect: %s', async (redirectUrl) => {
+  it.each([
+    ['javascript:alert(1)', null],
+    ['data:text/html,test', null],
+    ['/session/authorize', null],
+    ['http://cloud.example/session/authorize', 'http://cloudreve-internal.example:5212'],
+    ['http://cloudreve-internal.example:5212/session/authorize', 'http://cloudreve-internal.example:5212/path?unexpected=true'],
+    ['https://user:password@cloud.example/session/authorize', null]
+  ])
+  ('rejects an unsafe Cloudreve authorization redirect: %s', async (redirectUrl, trustedInternalAuthorizationOrigin) => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ redirect_url: redirectUrl }), {
       headers: { 'Content-Type': 'application/json' }
     }))
 
-    await expect(authorizeCloudreve()).rejects.toThrow('invalid Cloudreve authorization redirect')
+    await expect(authorizeCloudreve(trustedInternalAuthorizationOrigin)).rejects.toThrow('invalid Cloudreve authorization redirect')
   })
 })

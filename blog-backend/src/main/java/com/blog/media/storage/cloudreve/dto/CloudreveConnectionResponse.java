@@ -9,5 +9,6 @@ import java.util.List;
 public record CloudreveConnectionResponse(boolean configured, CloudreveConnectionStatus status,
                                          String authorizedSubject, String authorizedDisplayName,
                                          List<String> grantedScopes, Instant accessTokenExpiresAt,
-                                         Instant refreshTokenExpiresAt, String rootPath) {
+                                         Instant refreshTokenExpiresAt, String rootPath,
+                                         String trustedInternalAuthorizationOrigin) {
 }

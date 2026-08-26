@@ -80,6 +80,20 @@ class AdminCloudreveControllerTest {
     }
 
     @Test
+    void administratorReceivesOnlyTheExactTrustedInternalAuthorizationOrigin() throws Exception {
+        when(properties.isAllowTrustedInternalHttp()).thenReturn(true);
+        when(properties.authorizationUri()).thenReturn(URI.create("http://cloudreve-internal.example:5212/session/authorize"));
+        when(properties.getRootPath()).thenReturn("/blog");
+        when(connectionRepository.findSingleton()).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/admin/media/cloudreve").contextPath("/api").with(user("owner").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.trusted_internal_authorization_origin").value("http://cloudreve-internal.example:5212"))
+                .andExpect(jsonPath("$.authorization_uri").doesNotExist())
+                .andExpect(jsonPath("$.client_secret").doesNotExist());
+    }
+
+    @Test
     void onlyAdministratorWithCsrfCanAuthorizeOrDisconnect() throws Exception {
         MockHttpSession session = new MockHttpSession();
         stubAdmin();

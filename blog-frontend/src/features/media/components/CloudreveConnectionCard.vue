@@ -1,5 +1,5 @@
 <template>
-  <section class="admin-card cloudreve-connection" aria-labelledby="cloudreve-connection-title">
+  <section class="admin-card cloudreve-connection" aria-labelledby="cloudreve-connection-title" :aria-busy="loading ? 'true' : 'false'">
     <div class="cloudreve-connection__heading">
       <div>
         <p class="cloudreve-connection__eyebrow">媒体存储</p>
@@ -10,7 +10,10 @@
 
     <p v-if="loading" role="status" aria-live="polite">正在读取 Cloudreve 连接状态…</p>
     <template v-else>
-      <p v-if="!connection" class="admin-alert admin-alert--error" role="alert">无法读取 Cloudreve 连接状态，请检查网络后重试。</p>
+      <div v-if="!connection" class="admin-alert admin-alert--error" role="alert">
+        <p>无法读取 Cloudreve 连接状态，请检查网络后重试。</p>
+        <button class="admin-button admin-button--secondary" type="button" aria-label="重试读取 Cloudreve 连接状态" @click="load">重试</button>
+      </div>
       <p v-if="statusMessage" class="cloudreve-connection__result" role="status" aria-live="polite">{{ statusMessage }}</p>
 
       <template v-if="connection && !connection.configured">
@@ -109,7 +112,7 @@ async function startAuthorization(): Promise<void> {
   statusMessage.value = ''
   busy.value = 'authorize'
   try {
-    navigateToCloudreveAuthorization(await authorizeCloudreve())
+    navigateToCloudreveAuthorization(await authorizeCloudreve(connection.value?.trustedInternalAuthorizationOrigin ?? null))
   } catch {
     actionError.value = '无法发起 Cloudreve 授权，请检查配置后重试。'
   } finally {

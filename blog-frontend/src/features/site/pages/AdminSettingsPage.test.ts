@@ -27,7 +27,7 @@ describe('admin settings page', () => {
     vi.mocked(uploadMedia).mockReset()
     vi.mocked(getCloudreveConnection).mockReset().mockResolvedValue({
       configured: true, status: 'DISCONNECTED', authorizedSubject: null, authorizedDisplayName: null,
-      grantedScopes: [], accessTokenExpiresAt: null, refreshTokenExpiresAt: null, rootPath: '/blog'
+      grantedScopes: [], accessTokenExpiresAt: null, refreshTokenExpiresAt: null, rootPath: '/blog', trustedInternalAuthorizationOrigin: null
     })
     resetSharedPublicProfile()
     window.history.replaceState({}, '', '/admin/settings')

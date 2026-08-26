@@ -20,7 +20,8 @@ const connected: CloudreveConnectionResponse = {
   grantedScopes: ['Files.Read', 'Files.Write'],
   accessTokenExpiresAt: '2026-08-24T10:15:00Z',
   refreshTokenExpiresAt: '2026-09-24T10:15:00Z',
-  rootPath: '/blog'
+  rootPath: '/blog',
+  trustedInternalAuthorizationOrigin: null
 }
 
 describe('CloudreveConnectionCard', () => {
@@ -75,8 +76,17 @@ describe('CloudreveConnectionCard', () => {
     vi.mocked(getCloudreveConnection).mockRejectedValueOnce(new Error('provider response with secret details'))
     const failed = mount(CloudreveConnectionCard)
     await flushPromises()
-    expect(failed.get('[role="alert"]').text()).toBe('无法读取 Cloudreve 连接状态，请检查网络后重试。')
+    expect(failed.get('[role="alert"] p').text()).toBe('无法读取 Cloudreve 连接状态，请检查网络后重试。')
     expect(failed.text()).not.toContain('secret details')
+
+    let resolveRetry!: (value: CloudreveConnectionResponse) => void
+    vi.mocked(getCloudreveConnection).mockImplementationOnce(() => new Promise((resolve) => { resolveRetry = resolve }))
+    await failed.get('button[aria-label="重试读取 Cloudreve 连接状态"]').trigger('click')
+    expect(failed.get('section').attributes('aria-busy')).toBe('true')
+    resolveRetry(connected)
+    await flushPromises()
+    expect(getCloudreveConnection).toHaveBeenCalledTimes(3)
+    expect(failed.text()).toContain('Cloudreve 管理员')
   })
 
   it('uses validated OAuth navigation and reports a fixed authorization error', async () => {

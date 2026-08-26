@@ -71,7 +71,18 @@ export function deleteMedia(mediaId: number): Promise<void> { return http.delete
 type CloudreveAuthorizationRedirectResponse = { redirectUrl?: unknown }
 export type CloudreveAuthorizationUrl = string
 
-function allowedCloudreveAuthorizationUrl(value: unknown): CloudreveAuthorizationUrl {
+function trustedInternalAuthorizationOrigin(value: string | null): string | null {
+  if (typeof value !== 'string' || !value || value !== value.trim()) return null
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'http:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) return null
+    return url.origin
+  } catch {
+    return null
+  }
+}
+
+function allowedCloudreveAuthorizationUrl(value: unknown, approvedInternalAuthorizationOrigin: string | null): CloudreveAuthorizationUrl {
   if (typeof value !== 'string' || !value || value !== value.trim()) throw new Error('invalid Cloudreve authorization redirect')
 
   let url: URL
@@ -81,11 +92,9 @@ function allowedCloudreveAuthorizationUrl(value: unknown): CloudreveAuthorizatio
     throw new Error('invalid Cloudreve authorization redirect')
   }
 
-  const sameHttpOrigin = typeof window !== 'undefined'
-    && window.location.protocol === 'http:'
-    && url.protocol === 'http:'
-    && url.origin === window.location.origin
-  if ((url.protocol !== 'https:' && !sameHttpOrigin) || url.username || url.password) {
+  const approvedHttpOrigin = trustedInternalAuthorizationOrigin(approvedInternalAuthorizationOrigin)
+  const allowedInternalHttp = url.protocol === 'http:' && approvedHttpOrigin !== null && url.origin === approvedHttpOrigin
+  if ((url.protocol !== 'https:' && !allowedInternalHttp) || url.username || url.password) {
     throw new Error('invalid Cloudreve authorization redirect')
   }
   return url.toString()
@@ -95,9 +104,9 @@ export function getCloudreveConnection(): Promise<CloudreveConnectionResponse> {
   return http.get<CloudreveConnectionResponse>('/admin/media/cloudreve')
 }
 
-export async function authorizeCloudreve(): Promise<CloudreveAuthorizationUrl> {
+export async function authorizeCloudreve(approvedInternalAuthorizationOrigin: string | null = null): Promise<CloudreveAuthorizationUrl> {
   const response = await http.post<CloudreveAuthorizationRedirectResponse>('/admin/media/cloudreve/authorize')
-  return allowedCloudreveAuthorizationUrl(response.redirectUrl)
+  return allowedCloudreveAuthorizationUrl(response.redirectUrl, approvedInternalAuthorizationOrigin)
 }
 
 export function navigateToCloudreveAuthorization(authorizationUrl: CloudreveAuthorizationUrl): void {

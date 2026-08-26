@@ -40,15 +40,17 @@ public class AdminCloudreveController {
     @GetMapping
     public CloudreveConnectionResponse status() {
         CloudreveConnection connection = connections.findSingleton().orElse(null);
+        boolean configured = isEffectivelyConfigured();
         return new CloudreveConnectionResponse(
-                isEffectivelyConfigured(),
+                configured,
                 connection == null ? CloudreveConnectionStatus.DISCONNECTED : connection.getStatus(),
                 connection == null ? null : connection.getAuthorizedSubject(),
                 connection == null ? null : connection.getAuthorizedDisplayName(),
                 connection == null ? List.of() : scopes(connection.getGrantedScopes()),
                 connection == null ? null : connection.getAccessTokenExpiresAt(),
                 connection == null ? null : connection.getRefreshTokenExpiresAt(),
-                properties.getRootPath());
+                properties.getRootPath(),
+                trustedInternalAuthorizationOrigin(configured));
     }
 
     @PostMapping("/authorize")
@@ -80,6 +82,19 @@ public class AdminCloudreveController {
     private static List<String> scopes(String storedScopes) {
         if (storedScopes == null || storedScopes.isBlank()) return List.of();
         return List.of(storedScopes.trim().split("\\s+"));
+    }
+
+    /** Exposes only the exact HTTP origin that startup configuration explicitly trusted for OAuth navigation. */
+    private String trustedInternalAuthorizationOrigin(boolean configured) {
+        if (!configured || !properties.isAllowTrustedInternalHttp()) return null;
+        URI authorizationUri = properties.authorizationUri();
+        if (!"http".equalsIgnoreCase(authorizationUri.getScheme())
+                || authorizationUri.getUserInfo() != null
+                || authorizationUri.getHost() == null
+                || authorizationUri.getHost().isBlank()) {
+            return null;
+        }
+        return "http://" + authorizationUri.getAuthority();
     }
 
     private boolean isEffectivelyConfigured() {
