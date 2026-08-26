@@ -23,11 +23,13 @@ assert_rejected() {
   }
 }
 
-# Normalizes a YAML/.env assignment value. Quotes are removed only when they
-# wrap the complete value, so `${SECRET}suffix` cannot be mistaken for an
-# indirection merely because it starts with a variable reference.
+# Normalizes a YAML/.env assignment value. YAML comments preceded by whitespace
+# are removed before quote handling; quotes are removed only when they wrap the
+# complete value, so `${SECRET}suffix` cannot be mistaken for an indirection
+# merely because it starts with a variable reference.
 normalize_cloudreve_value() {
   local value=$1 first last
+  value="${value%%[[:space:]]#*}"
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   if [[ ${#value} -ge 2 ]]; then
@@ -62,16 +64,22 @@ is_private_cloudreve_endpoint() {
 # It parses each assignment value and only allows whole-value `${...}` or
 # `<...>` placeholders; Compose/Spring indirection may not have a suffix.
 scan_cloudreve_configuration() {
-  local assignment_pattern assignment_content_pattern findings file line content key value
+  local assignment_pattern assignment_content_pattern findings file line content key canonical_key value nocasematch_was_enabled=0
   assignment_pattern='(?i)^[[:space:]]*(BLOG_MEDIA_CLOUDREVE_(BASE_URL|AUTHORIZATION_URI|TOKEN_URI|REFRESH_URI|USERINFO_URI|REDIRECT_URI|CLIENT_ID|CLIENT_SECRET|POLICY_ID)|BLOG_MEDIA_TOKEN_ENCRYPTION_KEY|base-url|authorization-uri|token-uri|refresh-uri|userinfo-uri|redirect-uri|client-id|client-secret|policy-id|token-encryption-key)[[:space:]]*[:=]'
   assignment_content_pattern='^[[:space:]]*(BLOG_MEDIA_CLOUDREVE_(BASE_URL|AUTHORIZATION_URI|TOKEN_URI|REFRESH_URI|USERINFO_URI|REDIRECT_URI|CLIENT_ID|CLIENT_SECRET|POLICY_ID)|BLOG_MEDIA_TOKEN_ENCRYPTION_KEY|base-url|authorization-uri|token-uri|refresh-uri|userinfo-uri|redirect-uri|client-id|client-secret|policy-id|token-encryption-key)[[:space:]]*[:=][[:space:]]*(.*)$'
+  if shopt -q nocasematch; then
+    nocasematch_was_enabled=1
+  else
+    shopt -s nocasematch
+  fi
   findings=''
   while IFS=: read -r file line content; do
     [[ "$content" =~ $assignment_content_pattern ]] || continue
     key=${BASH_REMATCH[1]}
+    canonical_key=$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')
     value=${BASH_REMATCH[3]}
-    case "$key" in
-      BLOG_MEDIA_CLOUDREVE_CLIENT_ID|BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET|BLOG_MEDIA_CLOUDREVE_POLICY_ID|BLOG_MEDIA_TOKEN_ENCRYPTION_KEY|client-id|client-secret|policy-id|token-encryption-key)
+    case "$canonical_key" in
+      blog_media_cloudreve_client_id|blog_media_cloudreve_client_secret|blog_media_cloudreve_policy_id|blog_media_token_encryption_key|client-id|client-secret|policy-id|token-encryption-key)
         if ! is_allowed_cloudreve_credential_value "$value"; then
           findings+="${findings:+$'\n'}$file:$line:$content"
         fi
@@ -83,6 +91,9 @@ scan_cloudreve_configuration() {
         ;;
     esac
   done < <(rg --pcre2 -n --with-filename --no-heading -- "$assignment_pattern" "$@" 2>/dev/null || true)
+  if (( ! nocasematch_was_enabled )); then
+    shopt -u nocasematch
+  fi
   [[ -n "$findings" ]] || return 1
   printf '%s\n' "$findings"
   return 0
@@ -236,18 +247,39 @@ trap 'rm -rf "$fixture_dir"' EXIT
 secret_fixture="$fixture_dir/compose-secret.yml"
 ip_fixture="$fixture_dir/compose-private-ip.yml"
 quoted_ip_fixture="$fixture_dir/compose-quoted-private-ip.yml"
+commented_ip_fixture="$fixture_dir/compose-commented-private-ip.yml"
+quoted_commented_ip_fixture="$fixture_dir/compose-quoted-commented-private-ip.yml"
 appended_secret_fixture="$fixture_dir/compose-appended-secret.yml"
 quoted_placeholder_fixture="$fixture_dir/compose-quoted-placeholder.yml"
+placeholder_fixture="$fixture_dir/compose-placeholder.yml"
+appended_placeholder_fixture="$fixture_dir/compose-appended-placeholder.yml"
+mixed_case_secret_fixture="$fixture_dir/compose-mixed-case-secret.yml"
+mixed_case_ip_fixture="$fixture_dir/compose-mixed-case-private-ip.yml"
+mixed_case_placeholder_fixture="$fixture_dir/compose-mixed-case-placeholder.yml"
 printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: supplied-client-secret' > "$secret_fixture"
 printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_BASE_URL: http://192.168.10.20:5212' > "$ip_fixture"
 printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_BASE_URL: "http://192.168.10.20:5212"' > "$quoted_ip_fixture"
+printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_BASE_URL: http://192.168.10.20:5212 # internal' > "$commented_ip_fixture"
+printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_BASE_URL: "http://192.168.10.20:5212" # internal' > "$quoted_commented_ip_fixture"
 printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: ${SECRET}leaked-value' > "$appended_secret_fixture"
 printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: "${SECRET}"' > "$quoted_placeholder_fixture"
+printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: <PLACEHOLDER>' > "$placeholder_fixture"
+printf '%s\n' 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET: <PLACEHOLDER>suffix' > "$appended_placeholder_fixture"
+printf '%s\n' 'Client-Secret: supplied-client-secret' > "$mixed_case_secret_fixture"
+printf '%s\n' 'BLOG_media_cloudreve_base_url: "http://192.168.10.20:5212"' > "$mixed_case_ip_fixture"
+printf '%s\n' 'Client-Secret: "${SECRET}"' > "$mixed_case_placeholder_fixture"
 assert_cloudreve_scan_rejects "$secret_fixture" 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET'
 assert_cloudreve_scan_rejects "$ip_fixture" 'BLOG_MEDIA_CLOUDREVE_BASE_URL'
 assert_cloudreve_scan_rejects "$quoted_ip_fixture" 'BLOG_MEDIA_CLOUDREVE_BASE_URL'
+assert_cloudreve_scan_rejects "$commented_ip_fixture" 'BLOG_MEDIA_CLOUDREVE_BASE_URL'
+assert_cloudreve_scan_rejects "$quoted_commented_ip_fixture" 'BLOG_MEDIA_CLOUDREVE_BASE_URL'
 assert_cloudreve_scan_rejects "$appended_secret_fixture" 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET'
 assert_cloudreve_scan_allows "$quoted_placeholder_fixture"
+assert_cloudreve_scan_allows "$placeholder_fixture"
+assert_cloudreve_scan_rejects "$appended_placeholder_fixture" 'BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET'
+assert_cloudreve_scan_rejects "$mixed_case_secret_fixture" 'Client-Secret'
+assert_cloudreve_scan_rejects "$mixed_case_ip_fixture" 'BLOG_media_cloudreve_base_url'
+assert_cloudreve_scan_allows "$mixed_case_placeholder_fixture"
 grep -Fq 'Cloudreve/storage-policy backup' "$repo_dir/docs/cloudreve-media.md"
 grep -Fq 'retention/PITR' "$repo_dir/docs/cloudreve-media.md"
 grep -Fq 'post-restore reconciliation' "$repo_dir/docs/cloudreve-media.md"
