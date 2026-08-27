@@ -8,6 +8,8 @@ import com.blog.media.storage.ObjectUploadRequest;
 import com.blog.media.storage.StorageCapabilities;
 import com.blog.media.storage.StoredObject;
 import com.blog.media.storage.UploadTicket;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
@@ -27,6 +29,7 @@ import java.util.regex.Pattern;
 @Component
 @Conditional(CloudreveConfiguration.CloudreveRequiredConfigurationCondition.class)
 public final class CloudreveObjectStorage implements ObjectStorage {
+    private static final Logger LOGGER = LoggerFactory.getLogger(CloudreveObjectStorage.class);
     private static final Pattern NEW_OBJECT_KEY = Pattern.compile(
             "(avatars|article-covers|topic-covers|tool-covers|inline-images|attachments)/"
                     + "([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
@@ -88,7 +91,11 @@ public final class CloudreveObjectStorage implements ObjectStorage {
         }
         try {
             return storedObject(key, client.upload(key, request, content));
+        } catch (CloudreveAuthorizationRequiredException failure) {
+            logAuthorizationRequired("upload");
+            throw ObjectStorageException.transientFailure("Cloudreve media storage is temporarily unavailable", failure);
         } catch (CloudreveApiException failure) {
+            logFailure("upload", failure);
             if (failure.kind() == CloudreveApiException.Kind.CONFLICT) {
                 return recoverExistingUpload(key, request, failure);
             }
@@ -101,7 +108,11 @@ public final class CloudreveObjectStorage implements ObjectStorage {
         String key = validatedKey(location);
         try {
             return storedObject(key, client.inspect(key));
+        } catch (CloudreveAuthorizationRequiredException failure) {
+            logAuthorizationRequired("inspect");
+            throw ObjectStorageException.transientFailure("Cloudreve media storage is temporarily unavailable", failure);
         } catch (CloudreveApiException failure) {
+            logFailure("inspect", failure);
             throw translate(failure);
         }
     }
@@ -111,7 +122,11 @@ public final class CloudreveObjectStorage implements ObjectStorage {
         String key = validatedKey(location);
         try {
             return client.open(key);
+        } catch (CloudreveAuthorizationRequiredException failure) {
+            logAuthorizationRequired("open");
+            throw ObjectStorageException.transientFailure("Cloudreve media storage is temporarily unavailable", failure);
         } catch (CloudreveApiException failure) {
+            logFailure("open", failure);
             throw translate(failure);
         }
     }
@@ -127,7 +142,11 @@ public final class CloudreveObjectStorage implements ObjectStorage {
         String key = validatedKey(location);
         try {
             client.delete(key);
+        } catch (CloudreveAuthorizationRequiredException failure) {
+            logAuthorizationRequired("delete");
+            throw ObjectStorageException.transientFailure("Cloudreve media storage is temporarily unavailable", failure);
         } catch (CloudreveApiException failure) {
+            logFailure("delete", failure);
             if (failure.kind() != CloudreveApiException.Kind.NOT_FOUND) throw translate(failure);
         }
     }
@@ -172,6 +191,15 @@ public final class CloudreveObjectStorage implements ObjectStorage {
             return ObjectStorageException.notFound("Cloudreve media object was not found", failure);
         }
         return ObjectStorageException.transientFailure("Cloudreve media storage is temporarily unavailable", failure);
+    }
+
+    private static void logFailure(String operation, CloudreveApiException failure) {
+        LOGGER.warn("Cloudreve storage operation failed operation={} category={} reason={}", operation,
+                failure.kind(), CloudreveApiException.diagnosticReason(failure));
+    }
+
+    private static void logAuthorizationRequired(String operation) {
+        LOGGER.warn("Cloudreve storage operation failed operation={} category=AUTHORIZATION_REQUIRED", operation);
     }
 
     private static String requireRootPath(String rootPath) {

@@ -5,6 +5,8 @@ import com.blog.media.storage.ObjectUploadRequest;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
@@ -47,12 +49,12 @@ import javax.xml.stream.XMLStreamReader;
 @Conditional(CloudreveConfiguration.CloudreveRequiredConfigurationCondition.class)
 /** Cloudreve v4 文件 API 适配层：屏蔽 OAuth、分片协议及错误映射，业务层只处理统一存储契约。 */
 public class CloudreveFileClient {
+    private static final Logger LOGGER = LoggerFactory.getLogger(CloudreveFileClient.class);
     private static final int MAX_JSON_BYTES = 64 * 1024;
     private static final int MAX_PROVIDER_RESPONSE_BYTES = 64 * 1024;
     private static final int MAX_CHUNK_BYTES = 32 * 1024 * 1024;
     private static final int MIN_S3_NON_FINAL_PART_BYTES = 5 * 1024 * 1024;
     private static final int MAX_REDIRECTS = 3;
-    private static final String MIME_METADATA_KEY = "blog:mime_type";
     private static final Set<Integer> CONFLICT_CODES = Set.of(409, 40004);
 
     private final CloudreveProperties properties;
@@ -105,6 +107,9 @@ public class CloudreveFileClient {
             origins.add(candidate);
         }
         this.allowedOrigins = Set.copyOf(origins);
+        LOGGER.info("Cloudreve upload provider origins configured count={} origins={}", allowedOrigins.size(),
+                allowedOrigins.stream().map(URI::toASCIIString).sorted().toList());
+        LOGGER.info("Cloudreve upload policy configured policyId={}", properties.getPolicyId());
     }
 
     public CloudreveFileMetadata upload(String path, ObjectUploadRequest request, InputStream content) {
@@ -115,27 +120,38 @@ public class CloudreveFileClient {
             throw new IllegalArgumentException("Object request key does not match the Cloudreve path");
         }
         String uri = fileUri(key);
-        createParentDirectories(key);
         CloudreveUploadSession session = null;
         boolean finalized = false;
+        String stage = "CREATE_PARENT_DIRECTORIES";
         try {
+            createParentDirectories(key);
+            stage = "CREATE_SESSION";
             session = createUploadSession(uri, request);
+            stage = "VALIDATE_SESSION";
             validateSession(session, uri, request);
+            stage = "UPLOAD_CHUNKS";
             List<String> etags = uploadChunks(session, request, content);
             if (usesS3Multipart(session)) {
+                stage = "COMPLETE_MULTIPART";
                 completeS3Multipart(session, etags);
+                stage = "CALLBACK";
                 sendUploadCallback(uploadCallbackEndpoint("/" + pathSegment(session.policyType()) + "/"
                         + pathSegment(session.id()) + "/" + pathSegment(session.callbackSecret())));
             }
             finalized = true;
+            stage = "INSPECT_STORED_OBJECT";
             return inspect(key);
         } catch (CloudreveApiException failure) {
+            LOGGER.warn("Cloudreve upload failed stage={} category={} reason={} providerCode={}", stage,
+                    failure.kind(), CloudreveApiException.diagnosticReason(failure), failure.diagnosticCode());
             if (session != null && !finalized) abortQuietly(session);
             throw failure;
         } catch (IOException failure) {
+            LOGGER.warn("Cloudreve upload failed stage={} category=TRANSIENT reason=STREAM_IO_FAILURE", stage);
             if (session != null && !finalized) abortQuietly(session);
             throw failure(CloudreveApiException.Kind.TRANSIENT, "Cloudreve upload stream failed", failure);
         } catch (RuntimeException failure) {
+            LOGGER.warn("Cloudreve upload failed stage={} category=PROVIDER_FAILURE reason=RUNTIME_FAILURE", stage);
             if (session != null && !finalized) abortQuietly(session);
             if (failure instanceof IllegalArgumentException) throw failure;
             throw failure(CloudreveApiException.Kind.PROVIDER_FAILURE, "Cloudreve upload failed", failure);
@@ -150,11 +166,9 @@ public class CloudreveFileClient {
             if (data.path("type").asInt(-1) != 0) throw malformed();
             String returnedPath = requiredText(data, "path");
             if (!uri.equals(returnedPath)) throw malformed();
-            JsonNode metadata = data.path("metadata");
-            if (!metadata.isObject()) throw malformed();
             long size = requiredNonNegativeLong(data, "size");
             return new CloudreveFileMetadata(returnedPath, requiredText(data, "id"),
-                    requiredText(metadata, MIME_METADATA_KEY), size, requiredText(data, "primary_entity"));
+                    contentTypeFromObjectPath(returnedPath), size, requiredText(data, "primary_entity"));
         } catch (CloudreveApiException failure) {
             throw failure;
         } catch (RuntimeException failure) {
@@ -207,8 +221,8 @@ public class CloudreveFileClient {
         body.put("uri", uri);
         body.put("size", request.byteSize());
         body.put("policy_id", properties.getPolicyId());
+        body.put("last_modified", clock.millis());
         body.put("mime_type", request.contentType());
-        body.put("metadata", Map.of(MIME_METADATA_KEY, request.contentType()));
         JsonNode data = sendApi("PUT", apiEndpoint("/file/upload"), body, true, true);
         String recoverableSessionId = recoverableText(data, "session_id");
         try {
@@ -576,10 +590,43 @@ public class CloudreveFileClient {
         int code = envelope.path("code").asInt();
         if (code == 401) throw new UnauthorizedFailure();
         if (allowConflict && CONFLICT_CODES.contains(code)) return envelope.path("data");
+        if (code == 40001) {
+            LOGGER.warn("Cloudreve API parameter validation failed providerCode=40001 detail={}",
+                    safeProviderMessage(envelope.path("msg").asText()));
+        }
         if (code != 0) throw translateCode(code);
         JsonNode data = envelope.path("data");
         if (requireData && (data.isMissingNode() || data.isNull())) throw malformed();
         return data;
+    }
+
+    static String safeProviderMessage(String message) {
+        if (message == null || message.isBlank()) return "UNSPECIFIED";
+        String normalized = message.trim().replaceAll("\\s+", " ");
+        String lowerCase = normalized.toLowerCase(Locale.ROOT);
+        if (normalized.length() > 160 || lowerCase.contains("://") || lowerCase.contains("token")
+                || lowerCase.contains("secret") || lowerCase.contains("credential")
+                || lowerCase.contains("authorization") || lowerCase.contains("access key")) {
+            return "REDACTED";
+        }
+        return normalized.replaceAll("[^\\p{L}\\p{N} .,:;_()\\-]", "?");
+    }
+
+    private static String contentTypeFromObjectPath(String path) {
+        int extensionIndex = path.lastIndexOf('.');
+        if (extensionIndex < 0 || extensionIndex == path.length() - 1) throw malformed();
+        return switch (path.substring(extensionIndex + 1).toLowerCase(Locale.ROOT)) {
+            case "png" -> "image/png";
+            case "jpg" -> "image/jpeg";
+            case "gif" -> "image/gif";
+            case "pdf" -> "application/pdf";
+            case "zip" -> "application/zip";
+            case "txt" -> "text/plain";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            case "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            default -> throw malformed();
+        };
     }
 
     private RawResponse sendRaw(String method, URI target, String authorization,
@@ -711,7 +758,10 @@ public class CloudreveFileClient {
     }
 
     private void requireAllowed(URI uri) {
-        if (!allowedOrigins.contains(origin(requireAbsoluteHttp(uri, "Cloudreve URL")))) {
+        URI returnedOrigin = origin(requireAbsoluteHttp(uri, "Cloudreve URL"));
+        if (!allowedOrigins.contains(returnedOrigin)) {
+            LOGGER.warn("Cloudreve returned an upload origin outside the configured allowlist returnedOrigin={} allowedOrigins={}",
+                    returnedOrigin, allowedOrigins.stream().map(URI::toASCIIString).sorted().toList());
             throw failure(CloudreveApiException.Kind.PROVIDER_FAILURE, "Cloudreve returned an untrusted origin", null);
         }
     }
@@ -807,25 +857,29 @@ public class CloudreveFileClient {
     }
 
     private static CloudreveApiException translateHttp(int status) {
-        if (status == 404) return failure(CloudreveApiException.Kind.NOT_FOUND, "Cloudreve object was not found", null);
-        if (status == 409) return failure(CloudreveApiException.Kind.CONFLICT, "Cloudreve object conflicts with existing state", null);
+        if (status == 404) return failure(CloudreveApiException.Kind.NOT_FOUND, "Cloudreve object was not found", null, status);
+        if (status == 409) return failure(CloudreveApiException.Kind.CONFLICT, "Cloudreve object conflicts with existing state", null, status);
         if (status == 401 || status == 429 || status >= 500) {
-            return failure(CloudreveApiException.Kind.TRANSIENT, "Cloudreve request is temporarily unavailable", null);
+            return failure(CloudreveApiException.Kind.TRANSIENT, "Cloudreve request is temporarily unavailable", null, status);
         }
-        return failure(CloudreveApiException.Kind.PROVIDER_FAILURE, "Cloudreve request was rejected", null);
+        return failure(CloudreveApiException.Kind.PROVIDER_FAILURE, "Cloudreve request was rejected", null, status);
     }
 
     private static CloudreveApiException translateCode(int code) {
+        if (code == 40001) {
+            return failure(CloudreveApiException.Kind.PROVIDER_FAILURE,
+                    "Cloudreve request parameters were rejected", null, code);
+        }
         if (code == 404 || code == 40044) {
-            return failure(CloudreveApiException.Kind.NOT_FOUND, "Cloudreve object was not found", null);
+            return failure(CloudreveApiException.Kind.NOT_FOUND, "Cloudreve object was not found", null, code);
         }
         if (CONFLICT_CODES.contains(code)) {
-            return failure(CloudreveApiException.Kind.CONFLICT, "Cloudreve object conflicts with existing state", null);
+            return failure(CloudreveApiException.Kind.CONFLICT, "Cloudreve object conflicts with existing state", null, code);
         }
         if (code == 429 || code >= 500 && code < 600 || code >= 50_000 && code < 60_000) {
-            return failure(CloudreveApiException.Kind.TRANSIENT, "Cloudreve request is temporarily unavailable", null);
+            return failure(CloudreveApiException.Kind.TRANSIENT, "Cloudreve request is temporarily unavailable", null, code);
         }
-        return failure(CloudreveApiException.Kind.PROVIDER_FAILURE, "Cloudreve request failed", null);
+        return failure(CloudreveApiException.Kind.PROVIDER_FAILURE, "Cloudreve request failed", null, code);
     }
 
     private static CloudreveApiException malformed() {
@@ -834,6 +888,11 @@ public class CloudreveFileClient {
 
     private static CloudreveApiException failure(CloudreveApiException.Kind kind, String message, Throwable cause) {
         return new CloudreveApiException(kind, message, cause);
+    }
+
+    private static CloudreveApiException failure(CloudreveApiException.Kind kind, String message, Throwable cause,
+                                                 int diagnosticCode) {
+        return new CloudreveApiException(kind, message, cause, diagnosticCode);
     }
 
     private static String xmlEscape(String value) {

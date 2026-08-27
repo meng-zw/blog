@@ -1,4 +1,8 @@
 spring:
+  config:
+    # Load the repository-root dotenv file for IDEA and Maven local runs.
+    # Docker Compose injects the same values as environment variables instead.
+    import: optional:file:./.env[.properties],optional:file:../.env[.properties]
   application:
     name: blog-backend
   profiles:
@@ -57,8 +61,15 @@ blog:
       redirect-uri: ${BLOG_MEDIA_CLOUDREVE_REDIRECT_URI:}
       api-base-path: ${BLOG_MEDIA_CLOUDREVE_API_BASE_PATH:/api/v4}
       upload-callback-base-path: ${BLOG_MEDIA_CLOUDREVE_UPLOAD_CALLBACK_BASE_PATH:/api/v4/callback}
+      client-id: ${BLOG_MEDIA_CLOUDREVE_CLIENT_ID:}
+      client-secret: ${BLOG_MEDIA_CLOUDREVE_CLIENT_SECRET:}
+      policy-id: ${BLOG_MEDIA_CLOUDREVE_POLICY_ID:}
       root-path: ${BLOG_MEDIA_CLOUDREVE_ROOT_PATH:/blog}
-      allow-trusted-internal-http: ${BLOG_MEDIA_CLOUDREVE_ALLOW_TRUSTED_INTERNAL_HTTP:false}
+      token-encryption-key: ${BLOG_MEDIA_TOKEN_ENCRYPTION_KEY:}
+      provider-origins:
+        - ${BLOG_MEDIA_CLOUDREVE_PROVIDERORIGINS_0:}
+        - ${BLOG_MEDIA_CLOUDREVE_PROVIDERORIGINS_1:}
+      allow-trusted-internal-http: ${BLOG_MEDIA_CLOUDREVE_ALLOW_TRUSTED_INTERNAL_HTTP:true}
       connect-timeout: ${BLOG_MEDIA_CLOUDREVE_CONNECT_TIMEOUT:5s}
       request-timeout: ${BLOG_MEDIA_CLOUDREVE_REQUEST_TIMEOUT:30s}
   admin:

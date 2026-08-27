@@ -97,8 +97,8 @@ class CloudreveFileClientTest {
                         "uri", "cloudreve://my/blog/inline-images/2026/08/example.png",
                         "size", REPRESENTATIVE_MULTIPART_BYTES,
                         "policy_id", "policy-example",
-                        "mime_type", "image/png",
-                        "metadata", Map.of("blog:mime_type", "image/png")));
+                        "last_modified", NOW.toEpochMilli(),
+                        "mime_type", "image/png"));
                 respond(exchange, 200, session);
             } else if (method.equals("GET") && path.equals("/api/v4/callback/s3/session-example/callback-example")) {
                 assertThat(exchange.getRequestHeaders().getFirst("Authorization")).isNull();
@@ -133,6 +133,16 @@ class CloudreveFileClientTest {
                 .allSatisfy(body -> assertThat(body).contains("\"err_on_conflict\":false"));
         assertThat(provider.requests()).extracting(RecordedRequest::target).containsExactly(
                 "/multipart/part-0", "/multipart/part-1", "/multipart/complete");
+    }
+
+    @Test
+    void retainsOnlySafeCloudreveParameterErrorDetailsForDiagnostics() {
+        assertThat(CloudreveFileClient.safeProviderMessage("unknown policy id"))
+                .isEqualTo("unknown policy id");
+        assertThat(CloudreveFileClient.safeProviderMessage("https://example.test/?token=private"))
+                .isEqualTo("REDACTED");
+        assertThat(CloudreveFileClient.safeProviderMessage("secret key is invalid"))
+                .isEqualTo("REDACTED");
     }
 
     @Test
@@ -925,6 +935,19 @@ class CloudreveFileClientTest {
                 .containsExactly(
                         org.assertj.core.groups.Tuple.tuple("GET", "/api/v4/file/info?uri=cloudreve%3A%2F%2Fmy%2Fblog%2Finline-images%2F2026%2F08%2Fexample.png"),
                         org.assertj.core.groups.Tuple.tuple("DELETE", "/api/v4/file"));
+    }
+
+    @Test
+    void derivesTheStoredContentTypeFromTheConstrainedObjectExtensionWithoutPrivateMetadata() throws Exception {
+        MockServer api = server(exchange -> respond(exchange, 200, success(Map.of(
+                "type", 0,
+                "id", "file-example",
+                "path", "cloudreve://my/blog/inline-images/2026/08/example.png",
+                "size", 3,
+                "metadata", Map.of(),
+                "primary_entity", "entity-example"))));
+
+        assertThat(client(api).inspect("inline-images/2026/08/example.png").contentType()).isEqualTo("image/png");
     }
 
     @Test

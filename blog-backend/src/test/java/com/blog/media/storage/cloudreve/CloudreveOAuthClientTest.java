@@ -54,7 +54,7 @@ class CloudreveOAuthClientTest {
         assertThat(query).containsEntry("response_type", "code")
                 .containsEntry("client_id", "client-id")
                 .containsEntry("redirect_uri", "https://blog.example/oauth/callback")
-                .containsEntry("scope", "openid profile offline_access Files.Read Files.Write")
+                .containsEntry("scope", "openid profile offline_access Files.Write")
                 .containsEntry("state", "state-value")
                 .containsEntry("code_challenge_method", "S256");
         assertThat(query.get("code_challenge"))
@@ -68,7 +68,7 @@ class CloudreveOAuthClientTest {
         http.enqueue(200, """
                 {"access_token":"access","refresh_token":"refresh","token_type":"Bearer",
                  "expires_in":3600,"refresh_token_expires_in":7200,
-                 "scope":"openid profile offline_access Files.Read Files.Write"}
+                 "scope":"openid profile offline_access Files.Write"}
                 """);
 
         CloudreveOAuthClient.TokenPair pair = client(http).exchangeCode("code a&b", "verifier");
@@ -85,15 +85,15 @@ class CloudreveOAuthClientTest {
         assertThat(pair.refreshToken()).isEqualTo("refresh");
         assertThat(pair.accessExpiresAt()).isEqualTo(NOW.plusSeconds(3600));
         assertThat(pair.refreshExpiresAt()).isEqualTo(NOW.plusSeconds(7200));
-        assertThat(pair.scopes()).containsExactlyInAnyOrder("openid", "profile", "offline_access", "Files.Read", "Files.Write");
+        assertThat(pair.scopes()).containsExactlyInAnyOrder("openid", "profile", "offline_access", "Files.Write");
     }
 
     @Test
-    void rejectsExchangeWhenReturnedScopeOmitsReadWriteOrOfflineAccess() {
+    void rejectsExchangeWhenReturnedScopeOmitsWriteOrOfflineAccess() {
         StubHttpClient http = new StubHttpClient();
         http.enqueue(200, """
                 {"access_token":"access","refresh_token":"refresh","token_type":"Bearer",
-                 "expires_in":3600,"refresh_token_expires_in":7200,"scope":"openid profile offline_access Files.Write"}
+                 "expires_in":3600,"refresh_token_expires_in":7200,"scope":"openid profile offline_access"}
                 """);
 
         assertThatThrownBy(() -> client(http).exchangeCode("code", "verifier"))
@@ -266,7 +266,7 @@ class CloudreveOAuthClientTest {
     }
 
     private static List<String> requiredScopes() {
-        return List.of("offline_access", "Files.Read", "Files.Write");
+        return List.of("offline_access", "Files.Write");
     }
 
     private static CloudreveOAuthClient client(HttpClient httpClient, Duration requestTimeout) {

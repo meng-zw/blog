@@ -123,6 +123,33 @@ class CloudreveObjectStorageTest {
     }
 
     @Test
+    void classifiesSafeDiagnosticReasonsWithoutEchoingProviderDetails() {
+        assertThat(CloudreveApiException.diagnosticReason(new CloudreveApiException(
+                CloudreveApiException.Kind.PROVIDER_FAILURE, "Cloudreve returned an untrusted origin")))
+                .isEqualTo("UNTRUSTED_PROVIDER_ORIGIN");
+        assertThat(CloudreveApiException.diagnosticReason(new CloudreveApiException(
+                CloudreveApiException.Kind.PROVIDER_FAILURE, "Cloudreve storage policy did not match the approved S3 policy")))
+                .isEqualTo("POLICY_MISMATCH");
+        assertThat(CloudreveApiException.diagnosticReason(new CloudreveApiException(
+                CloudreveApiException.Kind.PROVIDER_FAILURE, "Cloudreve multipart completion was rejected")))
+                .isEqualTo("MULTIPART_COMPLETION_REJECTED");
+        assertThat(CloudreveApiException.diagnosticReason(new CloudreveApiException(
+                CloudreveApiException.Kind.PROVIDER_FAILURE, "Cloudreve request parameters were rejected")))
+                .isEqualTo("REQUEST_PARAMETER_ERROR");
+        assertThat(CloudreveApiException.diagnosticReason(new CloudreveApiException(
+                CloudreveApiException.Kind.PROVIDER_FAILURE, "signed-url=https://private.example/token")))
+                .isEqualTo("PROVIDER_FAILURE");
+    }
+
+    @Test
+    void retainsOnlyNumericProviderStatusForDiagnostics() {
+        CloudreveApiException failure = new CloudreveApiException(
+                CloudreveApiException.Kind.PROVIDER_FAILURE, "Cloudreve request was rejected", null, 400);
+
+        assertThat(failure.diagnosticCode()).isEqualTo(400);
+    }
+
+    @Test
     void recoversAnAlreadyStoredMatchingUploadAfterAnUncertainDatabaseCommit() {
         Fixture fixture = fixture("/blog/media");
         ObjectLocation location = new ObjectLocation(StorageProvider.CLOUDREVE, ROOT_IDENTITY, STORED_KEY);
@@ -213,6 +240,20 @@ class CloudreveObjectStorageTest {
                 .isInstanceOfSatisfying(ObjectStorageException.class,
                         failure -> assertThat(failure.kind()).isEqualTo(ObjectStorageException.Kind.TRANSIENT))
                 .hasMessageNotContaining("reauthorization");
+    }
+
+    @Test
+    void mapsAuthorizationRequiredDuringUploadToRetryableProviderFailure() {
+        Fixture fixture = fixture("/blog/media");
+        ObjectLocation location = new ObjectLocation(StorageProvider.CLOUDREVE, ROOT_IDENTITY, STORED_KEY);
+        ObjectUploadRequest request = new ObjectUploadRequest(STORED_KEY, "image/png", 3, 10);
+        ByteArrayInputStream content = new ByteArrayInputStream(new byte[]{1, 2, 3});
+        when(fixture.client.upload(STORED_KEY, request, content)).thenThrow(new CloudreveAuthorizationRequiredException());
+
+        assertThatThrownBy(() -> fixture.storage.upload(location, request, content))
+                .isInstanceOfSatisfying(ObjectStorageException.class,
+                        failure -> assertThat(failure.kind()).isEqualTo(ObjectStorageException.Kind.TRANSIENT))
+                .hasMessageNotContaining("authorization");
     }
 
     private static Fixture fixture(String rootPath) {
