@@ -1,0 +1,5 @@
+services:
+  api:
+    build: { context: ./blog-backend }
+  web:
+    build: { context: ./blog-frontend }

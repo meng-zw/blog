@@ -72,6 +72,54 @@ npm run lint:legacy-routes
 `BLOG_REQUIRE_DOCKER_TESTS=true`。本地默认允许缺少 Docker 时跳过。本地迁移旧内容前，
 必须先阅读 [旧内容迁移与备份说明](docs/migration/legacy-content-migration.md)，完成只读计数与备份门槛。
 
+## Docker 部署
+
+新服务器只需安装 Docker Compose 插件，然后复制 `.env.example` 为 `.env`，设置数据库密码、管理员账号、
+`PUBLIC_BASE_URL` 与所需的媒体存储变量。默认 Compose 会启动 MySQL、API 和 Web，数据库与 Local 媒体
+分别保存到 `mysql-data`、`media-data` 命名卷中。
+
+```bash
+cp .env.example .env
+# 编辑 .env，至少替换所有 CHANGE_ME_* 值
+docker compose pull
+docker compose up -d
+docker compose ps
+```
+
+### Cloudreve 媒体部署
+
+使用 Cloudreve 时，复制专用模板而不是默认的 Local 模板：
+
+```bash
+cp .env.cloudreve.example .env
+# 编辑 .env，替换所有 CHANGE_ME_* 值
+docker compose pull
+docker compose up -d
+```
+
+在 Cloudreve 创建专用 OAuth 应用后，必须将 `.env` 的
+`BLOG_MEDIA_CLOUDREVE_REDIRECT_URI` 原样登记为 Redirect URI，并为授权用户授予
+`openid profile offline_access Files.Write` scope 与 `/blog` 目录的读写权限。完成启动后，以管理员身份打开
+“媒体设置”并连接 Cloudreve。不要把 Client Secret、Token 加密密钥、授权码或 Token 写入仓库、镜像或日志。
+完整配置与外部联调检查见 [Cloudreve 媒体运行手册](docs/cloudreve-media.md)。
+
+公网镜像位于 `crpi-p853hywlwywfu2no.cn-hangzhou.personal.cr.aliyuncs.com/mengzw/my-storehouse`：
+API 使用 `api-<版本>` 标签，Web 使用 `web-<版本>` 标签。把 `.env` 中的 `BLOG_IMAGE_TAG` 设为同一版本即可回退或升级。
+
+从源码构建本地镜像时使用：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
+```
+
+发布镜像时，在安装 Docker 的 Windows 机器运行：
+
+```powershell
+.\scripts\publish-images.ps1 -Version 2026.08.28
+```
+
+脚本会交互式请求阿里云镜像仓库密码，构建并推送 `api-2026.08.28`、`web-2026.08.28`，同时更新 `api-latest`、`web-latest`。
+
 ## 配置
 
 主要环境变量：

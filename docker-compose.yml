@@ -2,13 +2,12 @@ name: xiaom-blog
 services:
   db:
     image: mysql:8.4
-    profiles: ["local-db"]
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: ${LOCAL_MYSQL_DATABASE:-blog}
-      MYSQL_USER: ${LOCAL_MYSQL_USER:-blog_app}
-      MYSQL_PASSWORD: ${LOCAL_MYSQL_PASSWORD:-local_only_change_me}
-      MYSQL_ROOT_PASSWORD: ${LOCAL_MYSQL_ROOT_PASSWORD:-local_root_change_me}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-blog}
+      MYSQL_USER: ${MYSQL_USER:-blog_app}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
       TZ: Asia/Shanghai
     volumes: ["mysql-data:/var/lib/mysql"]
     healthcheck:
@@ -19,13 +18,13 @@ services:
       start_period: 30s
     networks: [internal]
   api:
-    build: { context: ./blog-backend }
+    image: ${BLOG_IMAGE_REPOSITORY:-crpi-p853hywlwywfu2no.cn-hangzhou.personal.cr.aliyuncs.com/mengzw/my-storehouse}:api-${BLOG_IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       SPRING_PROFILES_ACTIVE: prod
-      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:?set SPRING_DATASOURCE_URL}
-      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:?set SPRING_DATASOURCE_USERNAME}
-      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:?set SPRING_DATASOURCE_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/${MYSQL_DATABASE:-blog}?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-blog_app}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
       BLOG_ADMIN_USERNAME: ${BLOG_ADMIN_USERNAME:?set BLOG_ADMIN_USERNAME}
       BLOG_ADMIN_PASSWORD: ${BLOG_ADMIN_PASSWORD:?set BLOG_ADMIN_PASSWORD}
       BLOG_ADMIN_DISPLAY_NAME: ${BLOG_ADMIN_DISPLAY_NAME:?set BLOG_ADMIN_DISPLAY_NAME}
@@ -76,8 +75,10 @@ services:
       retries: 12
       start_period: 45s
     networks: [internal]
+    depends_on:
+      db: { condition: service_healthy }
   web:
-    build: { context: ./blog-frontend }
+    image: ${BLOG_IMAGE_REPOSITORY:-crpi-p853hywlwywfu2no.cn-hangzhou.personal.cr.aliyuncs.com/mengzw/my-storehouse}:web-${BLOG_IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
       BACKEND_HOST: api
