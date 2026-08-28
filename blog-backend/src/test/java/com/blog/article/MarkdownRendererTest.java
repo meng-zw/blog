@@ -60,4 +60,11 @@ class MarkdownRendererTest {
                 .doesNotContain("ftp://")
                 .contains("legacy");
     }
+
+    @Test
+    void preservesStableSameOriginMediaUrlsForPublicArticleRendering() {
+        String html = renderer.render("![已上传图片](/api/media/assets/42)");
+
+        assertThat(html).contains("<img src=\"/api/media/assets/42\" alt=\"已上传图片\">");
+    }
 }
